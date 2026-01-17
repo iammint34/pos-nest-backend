@@ -1,0 +1,371 @@
+// POS Local Backend - Prisma Schema (SQLite)
+// Stores synced data from Portal and local orders
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// =====================
+// Device Configuration
+// =====================
+
+model DeviceConfig {
+  id                String    @id @default(uuid())
+  deviceIdentifier  String    @unique @map("device_identifier")
+  deviceName        String?   @map("device_name")
+  storeId           String    @map("store_id")
+  storeName         String?   @map("store_name")
+  branchId          String    @map("branch_id")
+  branchName        String?   @map("branch_name")
+  deviceToken       String?   @map("device_token")
+  tokenExpiresAt    DateTime? @map("token_expires_at")
+  lastSyncAt        DateTime? @map("last_sync_at")
+  lastSyncVersion   Int?      @map("last_sync_version")
+  isRegistered      Boolean   @default(false) @map("is_registered")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@map("device_config")
+}
+
+// =====================
+// Users (Synced from Portal)
+// =====================
+
+enum UserRole {
+  MANAGER
+  STAFF
+}
+
+model User {
+  id            String    @id @default(uuid())
+  portalUserId  String    @unique @map("portal_user_id") // ID from Portal
+  email         String    @unique
+  passwordHash  String    @map("password_hash")
+  firstName     String    @map("first_name")
+  lastName      String    @map("last_name")
+  role          UserRole  @default(STAFF)
+  pin           String?   // Optional quick PIN for fast login
+  isActive      Boolean   @default(true) @map("is_active")
+  lastLoginAt   DateTime? @map("last_login_at")
+  syncedAt      DateTime  @default(now()) @map("synced_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  orders        Order[]
+  sessions      UserSession[]
+
+  @@map("users")
+}
+
+model UserSession {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  token       String    @unique
+  expiresAt   DateTime  @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_sessions")
+}
+
+// =====================
+// Categories (Synced from Portal)
+// =====================
+
+model Category {
+  id            String    @id @default(uuid())
+  portalId      String    @unique @map("portal_id") // ID from Portal
+  name          String
+  description   String?
+  sortOrder     Int       @default(0) @map("sort_order")
+  isActive      Boolean   @default(true) @map("is_active")
+  syncedAt      DateTime  @default(now()) @map("synced_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  items         Item[]
+
+  @@map("categories")
+}
+
+// =====================
+// Items (Synced from Portal)
+// =====================
+
+model Item {
+  id            String    @id @default(uuid())
+  portalId      String    @unique @map("portal_id") // ID from Portal
+  categoryId    String?   @map("category_id")
+  sku           String?
+  name          String
+  description   String?
+  price         Decimal   @default(0)
+  isActive      Boolean   @default(true) @map("is_active")
+  isAvailable   Boolean   @default(true) @map("is_available") // Branch-specific availability
+  version       Int       @default(1)
+  syncedAt      DateTime  @default(now()) @map("synced_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  category      Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  orderItems    OrderItem[]
+
+  @@index([categoryId])
+  @@index([sku])
+  @@map("items")
+}
+
+// =====================
+// Orders (Local)
+// =====================
+
+enum OrderStatus {
+  OPEN        // Currently being edited
+  HELD        // Parked for later
+  COMPLETED   // Paid and closed
+  VOIDED      // Cancelled
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEOUT
+  DELIVERY
+  DRIVE_THRU
+}
+
+model Order {
+  id              String      @id @default(uuid())
+  orderNumber     String      @unique @map("order_number") // e.g., "001", "002"
+  orderType       OrderType   @default(DINE_IN) @map("order_type")
+  status          OrderStatus @default(OPEN)
+  userId          String      @map("user_id") // Cashier who created
+  customerName    String?     @map("customer_name")
+  customerPhone   String?     @map("customer_phone")
+  subtotal        Decimal     @default(0)
+  discountTotal   Decimal     @default(0) @map("discount_total")
+  taxTotal        Decimal     @default(0) @map("tax_total")
+  grandTotal      Decimal     @default(0) @map("grand_total")
+  notes           String?
+  syncStatus      String      @default("PENDING") @map("sync_status") // PENDING, SYNCED, FAILED
+  syncedAt        DateTime?   @map("synced_at")
+  portalOrderId   String?     @map("portal_order_id") // ID from Portal after sync
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  closedAt        DateTime?   @map("closed_at")
+
+  // Relations
+  user            User        @relation(fields: [userId], references: [id])
+  orderItems      OrderItem[]
+  discounts       OrderDiscount[]
+  payments        Payment[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([syncStatus])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id              String    @id @default(uuid())
+  orderId         String    @map("order_id")
+  itemId          String?   @map("item_id")
+  itemName        String    @map("item_name") // Denormalized
+  itemSku         String?   @map("item_sku")
+  quantity        Int       @default(1)
+  unitPrice       Decimal   @map("unit_price")
+  discountAmount  Decimal   @default(0) @map("discount_amount")
+  taxAmount       Decimal   @default(0) @map("tax_amount")
+  totalPrice      Decimal   @map("total_price")
+  notes           String?
+  isVoided        Boolean   @default(false) @map("is_voided")
+  voidReason      String?   @map("void_reason")
+  voidedBy        String?   @map("voided_by") // User ID who voided
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  order           Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  item            Item?     @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  discounts       OrderDiscount[]
+
+  @@index([orderId])
+  @@index([itemId])
+  @@map("order_items")
+}
+
+// =====================
+// Discounts
+// =====================
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+enum DiscountScope {
+  ORDER
+  ITEM
+}
+
+model OrderDiscount {
+  id              String        @id @default(uuid())
+  orderId         String        @map("order_id")
+  orderItemId     String?       @map("order_item_id")
+  discountName    String        @map("discount_name")
+  discountType    DiscountType  @map("discount_type")
+  discountScope   DiscountScope @map("discount_scope")
+  discountValue   Decimal       @map("discount_value") // Percentage or amount
+  discountAmount  Decimal       @map("discount_amount") // Actual amount discounted
+  reason          String?
+  appliedBy       String        @map("applied_by") // User ID
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  // Relations
+  order           Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItem       OrderItem?    @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([orderItemId])
+  @@map("order_discounts")
+}
+
+// =====================
+// Payments
+// =====================
+
+enum PaymentMethod {
+  CASH
+  CREDIT_CARD
+  DEBIT_CARD
+  MOBILE_PAYMENT
+  GIFT_CARD
+  STORE_CREDIT
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+model Payment {
+  id              String        @id @default(uuid())
+  orderId         String        @map("order_id")
+  paymentMethod   PaymentMethod @map("payment_method")
+  status          PaymentStatus @default(COMPLETED)
+  amount          Decimal
+  tipAmount       Decimal       @default(0) @map("tip_amount")
+  changeAmount    Decimal       @default(0) @map("change_amount")
+  referenceNumber String?       @map("reference_number")
+  processedBy     String        @map("processed_by") // User ID
+  processedAt     DateTime      @default(now()) @map("processed_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  // Relations
+  order           Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  refunds         Refund[]
+
+  @@index([orderId])
+  @@map("payments")
+}
+
+model Refund {
+  id              String        @id @default(uuid())
+  paymentId       String        @map("payment_id")
+  orderId         String        @map("order_id")
+  amount          Decimal
+  reason          String?
+  refundMethod    PaymentMethod @map("refund_method")
+  processedBy     String        @map("processed_by") // User ID (must be Manager)
+  processedAt     DateTime      @default(now()) @map("processed_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  // Relations
+  payment         Payment       @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@index([orderId])
+  @@map("refunds")
+}
+
+// =====================
+// Sync Queue (POS → Portal)
+// =====================
+
+enum SyncOperation {
+  CREATE_ORDER
+  VOID_ORDER
+  REFUND
+}
+
+enum SyncQueueStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+model SyncQueue {
+  id            String          @id @default(uuid())
+  operation     SyncOperation
+  entityType    String          @map("entity_type") // Order, Refund, etc.
+  entityId      String          @map("entity_id")
+  payload       String          // JSON payload
+  status        SyncQueueStatus @default(PENDING)
+  attempts      Int             @default(0)
+  lastAttemptAt DateTime?       @map("last_attempt_at")
+  errorMessage  String?         @map("error_message")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("sync_queue")
+}
+
+// =====================
+// Sync Log (History)
+// =====================
+
+enum SyncDirection {
+  PORTAL_TO_POS
+  POS_TO_PORTAL
+}
+
+enum SyncLogStatus {
+  SUCCESS
+  FAILED
+  PARTIAL
+}
+
+model SyncLog {
+  id            String        @id @default(uuid())
+  direction     SyncDirection
+  syncType      String        @map("sync_type") // USERS, ITEMS, CATEGORIES, ORDERS
+  status        SyncLogStatus
+  itemCount     Int?          @map("item_count")
+  errorMessage  String?       @map("error_message")
+  startedAt     DateTime      @map("started_at")
+  completedAt   DateTime?     @map("completed_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  @@index([direction])
+  @@index([syncType])
+  @@index([createdAt])
+  @@map("sync_logs")
+}
