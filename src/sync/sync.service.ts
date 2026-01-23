@@ -4,8 +4,13 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { PortalApiService } from '../portal-api/portal-api.service';
 import { DeviceService } from '../device/device.service';
-import { PortalUser, PortalCategory, PortalItem, DeletedRecord } from '../portal-api/portal-api.types';
-import * as bcrypt from 'bcrypt';
+import {
+  PortalUser,
+  PortalCategory,
+  PortalItem,
+  DeletedRecord,
+  PortalBirConfig,
+} from '../portal-api/portal-api.types';
 
 export interface SyncStatus {
   lastSyncAt: Date | null;
@@ -85,7 +90,10 @@ export class SyncService {
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async scheduledSync() {
-    const syncInterval = this.configService.get<number>('SYNC_INTERVAL_MS', 60000);
+    const syncInterval = this.configService.get<number>(
+      'SYNC_INTERVAL_MS',
+      60000,
+    );
 
     // Check if enough time has passed since last sync
     const deviceConfig = await this.prisma.deviceConfig.findFirst();
@@ -126,7 +134,13 @@ export class SyncService {
       const isRegistered = await this.deviceService.isRegistered();
       if (!isRegistered) {
         result.errorMessage = 'Device not registered';
-        await this.logSync('PORTAL_TO_POS', 'ALL', 'FAILED', result.errorMessage, syncStartedAt);
+        await this.logSync(
+          'PORTAL_TO_POS',
+          'ALL',
+          'FAILED',
+          result.errorMessage,
+          syncStartedAt,
+        );
         return result;
       }
 
@@ -135,7 +149,13 @@ export class SyncService {
 
       if (!deviceIdentifier || !deviceToken) {
         result.errorMessage = 'Missing device credentials';
-        await this.logSync('PORTAL_TO_POS', 'ALL', 'FAILED', result.errorMessage, syncStartedAt);
+        await this.logSync(
+          'PORTAL_TO_POS',
+          'ALL',
+          'FAILED',
+          result.errorMessage,
+          syncStartedAt,
+        );
         return result;
       }
 
@@ -150,18 +170,30 @@ export class SyncService {
         },
       );
 
-      this.logger.log(`Portal sync response: success=${syncData.success}, version=${syncData.version}, users=${syncData.users?.length ?? 0}, categories=${syncData.categories?.length ?? 0}, items=${syncData.items?.length ?? 0}`);
+      this.logger.log(
+        `Portal sync response: success=${syncData.success}, version=${syncData.version}, users=${syncData.users?.length ?? 0}, categories=${syncData.categories?.length ?? 0}, items=${syncData.items?.length ?? 0}`,
+      );
 
       // Debug: log first item if any
       if (syncData.items && syncData.items.length > 0) {
-        this.logger.log(`First item sample: ${JSON.stringify(syncData.items[0])}`);
+        this.logger.log(
+          `First item sample: ${JSON.stringify(syncData.items[0])}`,
+        );
       } else {
-        this.logger.warn('No items returned from Portal - check if items exist in Portal with isActive=true');
+        this.logger.warn(
+          'No items returned from Portal - check if items exist in Portal with isActive=true',
+        );
       }
 
       if (!syncData.success) {
         result.errorMessage = 'Portal sync returned unsuccessful response';
-        await this.logSync('PORTAL_TO_POS', 'ALL', 'FAILED', result.errorMessage, syncStartedAt);
+        await this.logSync(
+          'PORTAL_TO_POS',
+          'ALL',
+          'FAILED',
+          result.errorMessage,
+          syncStartedAt,
+        );
         return result;
       }
 
@@ -172,7 +204,9 @@ export class SyncService {
 
       // Handle deleted users
       if (syncData.deletedUsers && syncData.deletedUsers.length > 0) {
-        result.usersSync.deleted = await this.handleDeletedUsers(syncData.deletedUsers);
+        result.usersSync.deleted = await this.handleDeletedUsers(
+          syncData.deletedUsers,
+        );
       }
 
       // Sync categories (upserts)
@@ -182,7 +216,9 @@ export class SyncService {
 
       // Handle deleted categories
       if (syncData.deletedCategories && syncData.deletedCategories.length > 0) {
-        result.categoriesSync.deleted = await this.handleDeletedCategories(syncData.deletedCategories);
+        result.categoriesSync.deleted = await this.handleDeletedCategories(
+          syncData.deletedCategories,
+        );
       }
 
       // Sync items (upserts)
@@ -192,7 +228,15 @@ export class SyncService {
 
       // Handle deleted items
       if (syncData.deletedItems && syncData.deletedItems.length > 0) {
-        result.itemsSync.deleted = await this.handleDeletedItems(syncData.deletedItems);
+        result.itemsSync.deleted = await this.handleDeletedItems(
+          syncData.deletedItems,
+        );
+      }
+
+      // Sync BIR configuration from Portal
+      if (syncData.birConfig) {
+        await this.syncBirConfig(syncData.birConfig, syncData.storeName, syncData.branchName);
+        this.logger.log('BIR configuration synced from Portal');
       }
 
       // Update last sync timestamp and version
@@ -203,23 +247,41 @@ export class SyncService {
       result.syncedAt = new Date();
 
       const totalItems =
-        result.usersSync.created + result.usersSync.updated + result.usersSync.deleted +
-        result.categoriesSync.created + result.categoriesSync.updated + result.categoriesSync.deleted +
-        result.itemsSync.created + result.itemsSync.updated + result.itemsSync.deleted;
+        result.usersSync.created +
+        result.usersSync.updated +
+        result.usersSync.deleted +
+        result.categoriesSync.created +
+        result.categoriesSync.updated +
+        result.categoriesSync.deleted +
+        result.itemsSync.created +
+        result.itemsSync.updated +
+        result.itemsSync.deleted;
 
-      await this.logSync('PORTAL_TO_POS', 'ALL', 'SUCCESS', null, syncStartedAt, totalItems);
+      await this.logSync(
+        'PORTAL_TO_POS',
+        'ALL',
+        'SUCCESS',
+        null,
+        syncStartedAt,
+        totalItems,
+      );
 
       this.logger.log(
         `Sync completed (v${syncData.version}): ` +
-        `Users(+${result.usersSync.created}/~${result.usersSync.updated}/-${result.usersSync.deleted}), ` +
-        `Categories(+${result.categoriesSync.created}/~${result.categoriesSync.updated}/-${result.categoriesSync.deleted}), ` +
-        `Items(+${result.itemsSync.created}/~${result.itemsSync.updated}/-${result.itemsSync.deleted})`,
+          `Users(+${result.usersSync.created}/~${result.usersSync.updated}/-${result.usersSync.deleted}), ` +
+          `Categories(+${result.categoriesSync.created}/~${result.categoriesSync.updated}/-${result.categoriesSync.deleted}), ` +
+          `Items(+${result.itemsSync.created}/~${result.itemsSync.updated}/-${result.itemsSync.deleted})`,
       );
-
     } catch (error) {
       result.errorMessage = error.message;
       this.logger.error(`Sync failed: ${error.message}`);
-      await this.logSync('PORTAL_TO_POS', 'ALL', 'FAILED', error.message, syncStartedAt);
+      await this.logSync(
+        'PORTAL_TO_POS',
+        'ALL',
+        'FAILED',
+        error.message,
+        syncStartedAt,
+      );
     } finally {
       this.isSyncing = false;
     }
@@ -271,7 +333,9 @@ export class SyncService {
           stats.created++;
         }
       } catch (error) {
-        this.logger.error(`Failed to sync user ${portalUser.id}: ${error.message}`);
+        this.logger.error(
+          `Failed to sync user ${portalUser.id}: ${error.message}`,
+        );
         stats.errors++;
       }
     }
@@ -282,7 +346,9 @@ export class SyncService {
   /**
    * Handle deleted/deactivated users from Portal
    */
-  private async handleDeletedUsers(deletedUsers: DeletedRecord[]): Promise<number> {
+  private async handleDeletedUsers(
+    deletedUsers: DeletedRecord[],
+  ): Promise<number> {
     let deletedCount = 0;
 
     for (const deleted of deletedUsers) {
@@ -303,7 +369,9 @@ export class SyncService {
           deletedCount++;
         }
       } catch (error) {
-        this.logger.error(`Failed to handle deleted user ${deleted.id}: ${error.message}`);
+        this.logger.error(
+          `Failed to handle deleted user ${deleted.id}: ${error.message}`,
+        );
       }
     }
 
@@ -313,7 +381,9 @@ export class SyncService {
   /**
    * Sync categories from Portal
    */
-  private async syncCategories(categories: PortalCategory[]): Promise<SyncStats> {
+  private async syncCategories(
+    categories: PortalCategory[],
+  ): Promise<SyncStats> {
     const stats: SyncStats = { created: 0, updated: 0, deleted: 0, errors: 0 };
 
     for (const portalCategory of categories) {
@@ -348,7 +418,9 @@ export class SyncService {
           stats.created++;
         }
       } catch (error) {
-        this.logger.error(`Failed to sync category ${portalCategory.id}: ${error.message}`);
+        this.logger.error(
+          `Failed to sync category ${portalCategory.id}: ${error.message}`,
+        );
         stats.errors++;
       }
     }
@@ -359,7 +431,9 @@ export class SyncService {
   /**
    * Handle deleted/deactivated categories from Portal
    */
-  private async handleDeletedCategories(deletedCategories: DeletedRecord[]): Promise<number> {
+  private async handleDeletedCategories(
+    deletedCategories: DeletedRecord[],
+  ): Promise<number> {
     let deletedCount = 0;
 
     for (const deleted of deletedCategories) {
@@ -380,7 +454,9 @@ export class SyncService {
           deletedCount++;
         }
       } catch (error) {
-        this.logger.error(`Failed to handle deleted category ${deleted.id}: ${error.message}`);
+        this.logger.error(
+          `Failed to handle deleted category ${deleted.id}: ${error.message}`,
+        );
       }
     }
 
@@ -442,7 +518,9 @@ export class SyncService {
           stats.created++;
         }
       } catch (error) {
-        this.logger.error(`Failed to sync item ${portalItem.id}: ${error.message}`);
+        this.logger.error(
+          `Failed to sync item ${portalItem.id}: ${error.message}`,
+        );
         stats.errors++;
       }
     }
@@ -453,7 +531,9 @@ export class SyncService {
   /**
    * Handle deleted/deactivated items from Portal
    */
-  private async handleDeletedItems(deletedItems: DeletedRecord[]): Promise<number> {
+  private async handleDeletedItems(
+    deletedItems: DeletedRecord[],
+  ): Promise<number> {
     let deletedCount = 0;
 
     for (const deleted of deletedItems) {
@@ -475,11 +555,59 @@ export class SyncService {
           deletedCount++;
         }
       } catch (error) {
-        this.logger.error(`Failed to handle deleted item ${deleted.id}: ${error.message}`);
+        this.logger.error(
+          `Failed to handle deleted item ${deleted.id}: ${error.message}`,
+        );
       }
     }
 
     return deletedCount;
+  }
+
+  /**
+   * Sync BIR configuration from Portal
+   */
+  private async syncBirConfig(
+    birConfig: PortalBirConfig,
+    storeName?: string,
+    branchName?: string,
+  ): Promise<void> {
+    try {
+      const deviceConfig = await this.prisma.deviceConfig.findFirst();
+
+      if (!deviceConfig) {
+        this.logger.warn('No device config found, cannot sync BIR config');
+        return;
+      }
+
+      await this.prisma.deviceConfig.update({
+        where: { id: deviceConfig.id },
+        data: {
+          // Store-level BIR info
+          storeName: storeName || deviceConfig.storeName,
+          branchName: branchName || deviceConfig.branchName,
+          registeredName: birConfig.registeredName || deviceConfig.registeredName,
+          registeredAddress: birConfig.registeredAddress || deviceConfig.registeredAddress,
+          vatTin: birConfig.vatTin || deviceConfig.vatTin,
+          isVatRegistered: birConfig.isVatRegistered,
+          // Branch-level PTU info
+          ptuNo: birConfig.ptuNo || deviceConfig.ptuNo,
+          ptuDateIssued: birConfig.ptuDateIssued || deviceConfig.ptuDateIssued,
+          ptuValidUntil: birConfig.ptuValidUntil || deviceConfig.ptuValidUntil,
+          accreditationNo: birConfig.accreditationNo || deviceConfig.accreditationNo,
+          // Device-level MIN info
+          min: birConfig.min || deviceConfig.min,
+          serialNumber: birConfig.serialNumber || deviceConfig.serialNumber,
+          permitNumber: birConfig.permitNumber || deviceConfig.permitNumber,
+        },
+      });
+
+      this.logger.log(
+        `BIR config synced: PTU=${birConfig.ptuNo}, MIN=${birConfig.min}, VAT TIN=${birConfig.vatTin}`,
+      );
+    } catch (error) {
+      this.logger.error(`Failed to sync BIR config: ${error.message}`);
+    }
   }
 
   /**

@@ -8,6 +8,10 @@ import {
   SyncOrderPayload,
   SyncResult,
   BatchSyncResult,
+  SyncShiftPayload,
+  SyncShiftResult,
+  SyncZReadingPayload,
+  SyncZReadingResult,
 } from './portal-api.types';
 
 @Injectable()
@@ -184,6 +188,50 @@ export class PortalApiService {
           posOrderId: order.posOrderId,
           error: this.getErrorMessage(error),
         })),
+      };
+    }
+  }
+
+  /**
+   * Send shift data to Portal
+   */
+  async syncShift(
+    deviceIdentifier: string,
+    deviceToken: string,
+    shift: SyncShiftPayload,
+  ): Promise<SyncShiftResult> {
+    try {
+      const response = await this.client.post('/shifts/sync', shift, {
+        headers: this.getAuthHeaders(deviceIdentifier, deviceToken),
+      });
+      return response.data;
+    } catch (error) {
+      return {
+        success: false,
+        posShiftId: shift.posShiftId,
+        error: this.getErrorMessage(error),
+      };
+    }
+  }
+
+  /**
+   * Send Z-Reading data to Portal
+   */
+  async syncZReading(
+    deviceIdentifier: string,
+    deviceToken: string,
+    zReading: SyncZReadingPayload,
+  ): Promise<SyncZReadingResult> {
+    try {
+      const response = await this.client.post('/reports/z-readings/sync', zReading, {
+        headers: this.getAuthHeaders(deviceIdentifier, deviceToken),
+      });
+      return response.data;
+    } catch (error) {
+      return {
+        success: false,
+        posZReadingId: zReading.posZReadingId,
+        error: this.getErrorMessage(error),
       };
     }
   }

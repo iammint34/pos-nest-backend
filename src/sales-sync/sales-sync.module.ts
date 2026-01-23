@@ -6,11 +6,7 @@ import { PortalApiModule } from '../portal-api/portal-api.module';
 import { DeviceModule } from '../device/device.module';
 
 @Module({
-  imports: [
-    ScheduleModule.forRoot(),
-    PortalApiModule,
-    DeviceModule,
-  ],
+  imports: [ScheduleModule.forRoot(), PortalApiModule, DeviceModule],
   controllers: [SalesSyncController],
   providers: [SalesSyncService],
   exports: [SalesSyncService],

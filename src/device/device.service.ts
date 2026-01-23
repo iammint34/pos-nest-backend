@@ -90,6 +90,16 @@ export class DeviceService {
     if (!config) {
       throw new NotFoundException('Device not registered');
     }
+    // Debug: log what's in the database
+    console.log('[DEBUG device.service] Raw config from DB:', JSON.stringify({
+      vatTin: config.vatTin,
+      min: config.min,
+      serialNumber: config.serialNumber,
+      permitNumber: config.permitNumber,
+      ptuNo: config.ptuNo,
+      registeredName: config.registeredName,
+      registeredAddress: config.registeredAddress,
+    }, null, 2));
     return {
       id: config.id,
       deviceIdentifier: config.deviceIdentifier,
@@ -100,6 +110,21 @@ export class DeviceService {
       branchName: config.branchName,
       isRegistered: config.isRegistered,
       lastSyncAt: config.lastSyncAt,
+      // BIR Compliance Fields
+      registeredName: config.registeredName,
+      registeredAddress: config.registeredAddress,
+      vatTin: config.vatTin,
+      min: config.min,
+      serialNumber: config.serialNumber,
+      permitNumber: config.permitNumber,
+      ptuNo: config.ptuNo,
+      ptuDateIssued: config.ptuDateIssued,
+      ptuValidUntil: config.ptuValidUntil,
+      accreditationNo: config.accreditationNo,
+      isVatRegistered: config.isVatRegistered,
+      nextInvoiceNumber: config.nextInvoiceNumber,
+      grandTotalAccum: config.grandTotalAccum ? Number(config.grandTotalAccum) : 0,
+      zCounterNo: config.zCounterNo,
     };
   }
 

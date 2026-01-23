@@ -30,6 +30,26 @@ model DeviceConfig {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
+  // BIR Compliance - Store Info (synced from Portal)
+  registeredName      String?   @map("registered_name")    // Official BIR-registered business name
+  registeredAddress   String?   @map("registered_address") // BIR-registered address
+  vatTin              String?   @map("vat_tin")            // VAT Registration TIN
+  isVatRegistered     Boolean   @default(true) @map("is_vat_registered")
+
+  // BIR Compliance - Branch/Device Info (synced from Portal)
+  min                 String?                              // Machine Identification Number
+  serialNumber        String?   @map("serial_number")      // Hardware serial number
+  permitNumber        String?   @map("permit_number")      // BIR permit number for this machine
+  ptuNo               String?   @map("ptu_no")             // Permit To Use Number
+  ptuDateIssued       String?   @map("ptu_date_issued")    // Date PTU was issued
+  ptuValidUntil       String?   @map("ptu_valid_until")    // PTU expiry date
+  accreditationNo     String?   @map("accreditation_no")   // BIR Accreditation Number
+
+  // BIR Compliance - Counters (Non-resettable)
+  nextInvoiceNumber   Int       @default(1) @map("next_invoice_number")  // Next sequential invoice number
+  grandTotalAccum     Decimal   @default(0) @map("grand_total_accum")    // Non-resettable grand total accumulator
+  zCounterNo          Int       @default(0) @map("z_counter_no")         // Non-resettable Z-counter
+
   @@map("device_config")
 }
 
@@ -60,6 +80,7 @@ model User {
   // Relations
   orders        Order[]
   sessions      UserSession[]
+  shifts        Shift[]
 
   @@map("users")
 }
@@ -128,6 +149,74 @@ model Item {
 }
 
 // =====================
+// Shifts & Cash Management
+// =====================
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+model Shift {
+  id            String      @id @default(uuid())
+  operatorId    String      @map("operator_id")
+  status        ShiftStatus @default(OPEN)
+  openedAt      DateTime    @default(now()) @map("opened_at")
+  closedAt      DateTime?   @map("closed_at")
+  openingCash   Decimal     @default(0) @map("opening_cash")
+  closingCash   Decimal?    @map("closing_cash")
+  expectedCash  Decimal?    @map("expected_cash")
+  variance      Decimal?
+  notes         String?
+  syncStatus    String      @default("PENDING") @map("sync_status")
+  syncedAt      DateTime?   @map("synced_at")
+  portalShiftId String?     @map("portal_shift_id")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  operator      User          @relation(fields: [operatorId], references: [id])
+  cashMovements CashMovement[]
+  orders        Order[]
+
+  @@index([operatorId])
+  @@index([status])
+  @@index([syncStatus])
+  @@map("shifts")
+}
+
+enum CashMovementType {
+  OPENING_FLOAT
+  CASH_SALE
+  CHANGE_GIVEN
+  TIP_CASH
+  PAID_OUT
+  DROP
+  CASH_IN
+  REFUND
+  CLOSING_COUNT
+}
+
+model CashMovement {
+  id            String           @id @default(uuid())
+  shiftId       String           @map("shift_id")
+  movementType  CashMovementType @map("movement_type")
+  amount        Decimal
+  referenceType String?          @map("reference_type")
+  referenceId   String?          @map("reference_id")
+  reason        String?
+  performedBy   String           @map("performed_by")
+  performedAt   DateTime         @default(now()) @map("performed_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  // Relations
+  shift         Shift            @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@index([shiftId])
+  @@map("cash_movements")
+}
+
+// =====================
 // Orders (Local)
 // =====================
 
@@ -148,15 +237,30 @@ enum OrderType {
 model Order {
   id              String      @id @default(uuid())
   orderNumber     String      @unique @map("order_number") // e.g., "001", "002"
+  invoiceNumber   String?     @unique @map("invoice_number") // BIR sequential invoice number (e.g., "SI-000001")
   orderType       OrderType   @default(DINE_IN) @map("order_type")
   status          OrderStatus @default(OPEN)
   userId          String      @map("user_id") // Cashier who created
+  shiftId         String?     @map("shift_id") // Current shift (optional for backward compatibility)
+  operatorId      String?     @map("operator_id") // Operator who handled the order
   customerName    String?     @map("customer_name")
   customerPhone   String?     @map("customer_phone")
   subtotal        Decimal     @default(0)
   discountTotal   Decimal     @default(0) @map("discount_total")
   taxTotal        Decimal     @default(0) @map("tax_total")
   grandTotal      Decimal     @default(0) @map("grand_total")
+
+  // BIR VAT Breakdown
+  vatableSales    Decimal     @default(0) @map("vatable_sales")    // VATable portion (grandTotal / 1.12)
+  vatAmount       Decimal     @default(0) @map("vat_amount")       // 12% VAT amount
+  vatExemptSales  Decimal     @default(0) @map("vat_exempt_sales") // VAT-exempt sales
+  zeroRatedSales  Decimal     @default(0) @map("zero_rated_sales") // Zero-rated sales
+
+  // B2B Customer Info (for claiming input tax)
+  customerTin             String?   @map("customer_tin")
+  customerBusinessName    String?   @map("customer_business_name")
+  customerBusinessAddress String?   @map("customer_business_address")
+
   notes           String?
   syncStatus      String      @default("PENDING") @map("sync_status") // PENDING, SYNCED, FAILED
   syncedAt        DateTime?   @map("synced_at")
@@ -167,13 +271,16 @@ model Order {
 
   // Relations
   user            User        @relation(fields: [userId], references: [id])
+  shift           Shift?      @relation(fields: [shiftId], references: [id])
   orderItems      OrderItem[]
   discounts       OrderDiscount[]
   payments        Payment[]
 
   @@index([userId])
+  @@index([shiftId])
   @@index([status])
   @@index([syncStatus])
+  @@index([invoiceNumber])
   @@index([createdAt])
   @@map("orders")
 }
@@ -311,6 +418,8 @@ enum SyncOperation {
   CREATE_ORDER
   VOID_ORDER
   REFUND
+  SYNC_SHIFT
+  SYNC_ZREADING
 }
 
 enum SyncQueueStatus {
@@ -368,4 +477,110 @@ model SyncLog {
   @@index([syncType])
   @@index([createdAt])
   @@map("sync_logs")
+}
+
+// =====================
+// BIR Compliance - Grand Total Log (Append-only, Non-resettable)
+// =====================
+
+model GrandTotalLog {
+  id                String    @id @default(uuid())
+  orderId           String    @map("order_id")
+  invoiceNumber     String    @map("invoice_number")
+  amount            Decimal                            // Amount added to grand total
+  runningTotal      Decimal   @map("running_total")   // New grand total after this transaction
+  transactionType   String    @map("transaction_type") // SALE, VOID, REFUND
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  // Note: This table is append-only. No UPDATE or DELETE operations allowed.
+  @@index([orderId])
+  @@index([createdAt])
+  @@map("grand_total_log")
+}
+
+// =====================
+// BIR Compliance - Z-Reading (End-of-Day Report)
+// =====================
+
+model ZReading {
+  id                    String    @id @default(uuid())
+
+  // Z-Counter (Non-resettable, increments daily)
+  zCounterNo            Int       @unique @map("z_counter_no")
+
+  // Invoice Range for the day
+  beginningInvoiceNo    String    @map("beginning_invoice_no")
+  endingInvoiceNo       String    @map("ending_invoice_no")
+
+  // Grand Total Tracking (Non-resettable)
+  beginningGrandTotal   Decimal   @map("beginning_grand_total")
+  endingGrandTotal      Decimal   @map("ending_grand_total")
+
+  // Daily Sales Summary
+  grossSales            Decimal   @map("gross_sales")
+  netSales              Decimal   @map("net_sales")
+  vatableSales          Decimal   @map("vatable_sales")
+  vatAmount             Decimal   @map("vat_amount")
+  vatExemptSales        Decimal   @map("vat_exempt_sales")
+  zeroRatedSales        Decimal   @map("zero_rated_sales")
+
+  // Adjustments
+  discountTotal         Decimal   @default(0) @map("discount_total")
+  refundTotal           Decimal   @default(0) @map("refund_total")
+  voidTotal             Decimal   @default(0) @map("void_total")
+
+  // Transaction Counts
+  transactionCount      Int       @map("transaction_count")
+  voidCount             Int       @default(0) @map("void_count")
+  refundCount           Int       @default(0) @map("refund_count")
+
+  // Metadata
+  closedBy              String    @map("closed_by")
+  closedAt              DateTime  @map("closed_at")
+  syncStatus            String    @default("PENDING") @map("sync_status")
+  syncedAt              DateTime? @map("synced_at")
+  portalZReadingId      String?   @map("portal_zreading_id")
+  createdAt             DateTime  @default(now()) @map("created_at")
+
+  @@index([closedAt])
+  @@index([syncStatus])
+  @@map("z_readings")
+}
+
+// =====================
+// BIR Compliance - Electronic Journal (Immutable Receipt Archive)
+// =====================
+
+model ElectronicJournal {
+  id                String    @id @default(uuid())
+
+  // Transaction Reference
+  orderId           String    @map("order_id")
+  invoiceNumber     String    @map("invoice_number")
+  transactionType   String    @map("transaction_type") // SALE, VOID, REFUND
+
+  // Receipt Content (Read-only, immutable record)
+  receiptContent    String    @map("receipt_content") // Full receipt text/JSON
+  receiptHash       String    @map("receipt_hash")    // SHA-256 hash for integrity
+
+  // Amounts
+  grandTotal        Decimal   @map("grand_total")
+  vatAmount         Decimal   @map("vat_amount")
+
+  // Operator Info
+  operatorId        String    @map("operator_id")
+  operatorName      String    @map("operator_name")
+
+  // Timestamps
+  transactionDate   DateTime  @map("transaction_date")
+  syncStatus        String    @default("PENDING") @map("sync_status")
+  syncedAt          DateTime? @map("synced_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  // Note: This table is append-only. No UPDATE or DELETE operations allowed.
+  @@index([orderId])
+  @@index([invoiceNumber])
+  @@index([transactionDate])
+  @@index([syncStatus])
+  @@map("electronic_journal")
 }

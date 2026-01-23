@@ -13,6 +13,9 @@ import { ItemsModule } from './items/items.module';
 import { OrdersModule } from './orders/orders.module';
 import { PaymentsModule } from './payments/payments.module';
 import { SalesSyncModule } from './sales-sync/sales-sync.module';
+import { ShiftsModule } from './shifts/shifts.module';
+import { BirModule } from './bir/bir.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -31,6 +34,9 @@ import { SalesSyncModule } from './sales-sync/sales-sync.module';
     OrdersModule,
     PaymentsModule,
     SalesSyncModule,
+    ShiftsModule,
+    BirModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

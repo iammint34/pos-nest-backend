@@ -13,10 +13,16 @@ import {
   CashPaymentDto,
 } from './dto/payment.dto';
 import { CurrentUserData } from '../auth/decorators/current-user.decorator';
+import { ShiftsService } from '../shifts/shifts.service';
+import { BirService } from '../bir/bir.service';
 
 @Injectable()
 export class PaymentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private shiftsService: ShiftsService,
+    private birService: BirService,
+  ) {}
 
   /**
    * Process single payment for order
@@ -97,6 +103,39 @@ export class PaymentsService {
       },
     });
 
+    // Record cash movement for shift tracking
+    // First check if order has a shiftId, if not, try to get user's current open shift
+    const fullOrder = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { shiftId: true },
+    });
+
+    let shiftId = fullOrder?.shiftId;
+
+    // If order doesn't have a shift, try to link it to user's current open shift
+    if (!shiftId) {
+      shiftId = await this.shiftsService.getOpenShiftId(user.userId);
+
+      // Update the order to link it to the shift for future reference
+      if (shiftId) {
+        await this.prisma.order.update({
+          where: { id: orderId },
+          data: { shiftId, operatorId: user.userId },
+        });
+      }
+    }
+
+    if (shiftId) {
+      await this.shiftsService.recordCashSale(
+        shiftId,
+        dto.amountTendered,
+        changeAmount,
+        tipAmount,
+        orderId,
+        user.userId,
+      );
+    }
+
     await this.completeOrder(orderId);
 
     return {
@@ -126,6 +165,24 @@ export class PaymentsService {
       );
     }
 
+    // Get shift ID for cash movement recording
+    const fullOrder = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { shiftId: true },
+    });
+    let shiftId = fullOrder?.shiftId;
+
+    // If order doesn't have a shift, try to link it to user's current open shift
+    if (!shiftId) {
+      shiftId = await this.shiftsService.getOpenShiftId(user.userId);
+      if (shiftId) {
+        await this.prisma.order.update({
+          where: { id: orderId },
+          data: { shiftId, operatorId: user.userId },
+        });
+      }
+    }
+
     const payments = [];
 
     for (const paymentDto of dto.payments) {
@@ -142,6 +199,19 @@ export class PaymentsService {
         },
       });
       payments.push(payment);
+
+      // Record cash movement if this is a cash payment
+      if (paymentDto.paymentMethod === PaymentMethod.CASH && shiftId) {
+        const tipAmount = paymentDto.tipAmount || 0;
+        await this.shiftsService.recordCashSale(
+          shiftId,
+          paymentDto.amount + tipAmount, // Cash received (no change in split payments)
+          0, // No change given in split payments
+          tipAmount,
+          orderId,
+          user.userId,
+        );
+      }
     }
 
     await this.completeOrder(orderId);
@@ -182,16 +252,38 @@ export class PaymentsService {
       );
     }
 
+    const refundMethod = dto.refundMethod || payment.paymentMethod;
+
     const refund = await this.prisma.refund.create({
       data: {
         paymentId: dto.paymentId,
         orderId,
         amount: dto.amount,
         reason: dto.reason,
-        refundMethod: dto.refundMethod || payment.paymentMethod,
+        refundMethod,
         processedBy: user.userId,
       },
     });
+
+    // Record cash movement if this is a cash refund
+    if (refundMethod === PaymentMethod.CASH) {
+      const fullOrder = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        select: { shiftId: true },
+      });
+
+      // Use order's shiftId or fall back to user's current open shift
+      const refundShiftId = fullOrder?.shiftId || await this.shiftsService.getOpenShiftId(user.userId);
+
+      if (refundShiftId) {
+        await this.shiftsService.recordCashRefund(
+          refundShiftId,
+          dto.amount,
+          orderId,
+          user.userId,
+        );
+      }
+    }
 
     // Update payment status if fully refunded
     if (dto.amount >= availableForRefund) {
@@ -250,17 +342,94 @@ export class PaymentsService {
   }
 
   /**
-   * Complete order after full payment
+   * Complete order after full payment (with BIR compliance)
    */
-  private async completeOrder(orderId: string) {
+  private async completeOrder(orderId: string, user?: CurrentUserData) {
+    // Generate BIR invoice number
+    const invoiceNumber = await this.birService.getNextInvoiceNumber();
+
+    // Get order details for journal entry
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        orderItems: {
+          where: { isVoided: false },
+          include: { item: { select: { name: true } } },
+        },
+        user: { select: { id: true, firstName: true, lastName: true } },
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    // Update order with completion status and invoice number
     await this.prisma.order.update({
       where: { id: orderId },
       data: {
         status: OrderStatus.COMPLETED,
         closedAt: new Date(),
+        invoiceNumber,
         syncStatus: 'PENDING',
       },
     });
+
+    // Update non-resettable grand total accumulator
+    await this.birService.updateGrandTotal(
+      orderId,
+      invoiceNumber,
+      Number(order.grandTotal),
+      'SALE',
+    );
+
+    // Get BIR config for receipt
+    try {
+      const birConfig = await this.birService.getDeviceBirConfig();
+
+      // Create electronic journal entry (immutable receipt archive)
+      const receiptData = {
+        registeredName: birConfig.registeredName,
+        registeredAddress: birConfig.registeredAddress,
+        vatTin: birConfig.vatTin,
+        min: birConfig.min,
+        ptuNo: birConfig.ptuNo,
+        ptuDateIssued: birConfig.ptuDateIssued,
+        ptuValidUntil: birConfig.ptuValidUntil,
+        invoiceNumber,
+        transactionDate: new Date(),
+        cashierName: `${order.user.firstName} ${order.user.lastName}`,
+        items: order.orderItems.map((item) => ({
+          name: item.itemName,
+          quantity: item.quantity,
+          unitPrice: Number(item.unitPrice),
+          totalPrice: Number(item.totalPrice),
+        })),
+        subtotal: Number(order.subtotal),
+        discountTotal: Number(order.discountTotal),
+        grandTotal: Number(order.grandTotal),
+        vatableSales: Number(order.vatableSales),
+        vatAmount: Number(order.vatAmount),
+        vatExemptSales: Number(order.vatExemptSales),
+        zeroRatedSales: Number(order.zeroRatedSales),
+        customerTin: order.customerTin || undefined,
+        customerBusinessName: order.customerBusinessName || undefined,
+        customerBusinessAddress: order.customerBusinessAddress || undefined,
+        isVatRegistered: birConfig.isVatRegistered,
+      };
+
+      await this.birService.createJournalEntry(
+        orderId,
+        invoiceNumber,
+        'SALE',
+        receiptData,
+        order.user.id,
+        `${order.user.firstName} ${order.user.lastName}`,
+      );
+    } catch (error) {
+      console.error('Failed to create journal entry:', error);
+      // Continue even if journal entry fails - order is still completed
+    }
 
     // Add to sync queue
     await this.prisma.syncQueue.create({

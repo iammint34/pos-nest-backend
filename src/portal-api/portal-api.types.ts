@@ -46,6 +46,23 @@ export interface DeletedRecord {
   deletedAt: string;
 }
 
+export interface PortalBirConfig {
+  // Store-level BIR info
+  registeredName: string;
+  registeredAddress: string;
+  vatTin: string;
+  isVatRegistered: boolean;
+  // Branch-level PTU info
+  ptuNo: string;
+  ptuDateIssued: string;
+  ptuValidUntil: string;
+  accreditationNo: string;
+  // Device-level MIN info
+  min: string;
+  serialNumber: string;
+  permitNumber: string;
+}
+
 export interface PortalSyncData {
   success: boolean;
   version: number;
@@ -58,6 +75,9 @@ export interface PortalSyncData {
   syncedAt: string;
   storeId: string;
   branchId: string;
+  storeName?: string;
+  branchName?: string;
+  birConfig?: PortalBirConfig;
 }
 
 export interface SyncRequestPayload {
@@ -79,6 +99,11 @@ export interface SyncOrderPayload {
   discountTotal?: number;
   taxTotal?: number;
   grandTotal: number;
+  // BIR VAT Breakdown
+  vatableSales?: number;
+  vatAmount?: number;
+  vatExemptSales?: number;
+  zeroRatedSales?: number;
   notes?: string;
   posCreatedAt: string;  // Portal expects posCreatedAt, not createdAt
   posClosedAt?: string;  // Portal expects posClosedAt, not closedAt
@@ -147,4 +172,68 @@ export interface BatchSyncResult {
   successful: number;
   failed: number;
   results: SyncResult[];
+}
+
+// Shift Sync Types
+export interface SyncShiftPayload {
+  posShiftId: string;
+  posOperatorId: string;
+  status: 'OPEN' | 'CLOSED';
+  openedAt: string;
+  closedAt?: string;
+  openingCash: number;
+  closingCash?: number;
+  expectedCash?: number;
+  variance?: number;
+  notes?: string;
+  cashMovements: SyncCashMovementPayload[];
+  orderCount: number;
+}
+
+export interface SyncCashMovementPayload {
+  movementType: string;
+  amount: number;
+  referenceType?: string;
+  referenceId?: string;
+  reason?: string;
+  performedBy: string;
+  performedAt: string;
+}
+
+export interface SyncShiftResult {
+  success: boolean;
+  posShiftId: string;
+  portalShiftId?: string;
+  error?: string;
+}
+
+// Z-Reading Sync Types
+export interface SyncZReadingPayload {
+  posZReadingId: string;
+  zCounterNo: number;
+  beginningInvoiceNo: string;
+  endingInvoiceNo: string;
+  beginningGrandTotal: number;
+  endingGrandTotal: number;
+  grossSales: number;
+  netSales: number;
+  vatableSales: number;
+  vatAmount: number;
+  vatExemptSales: number;
+  zeroRatedSales: number;
+  discountTotal: number;
+  refundTotal: number;
+  voidTotal: number;
+  transactionCount: number;
+  voidCount: number;
+  refundCount: number;
+  closedBy: string;
+  closedAt: string;
+}
+
+export interface SyncZReadingResult {
+  success: boolean;
+  posZReadingId: string;
+  portalZReadingId?: string;
+  error?: string;
 }

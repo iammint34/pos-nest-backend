@@ -31,7 +31,9 @@ async function bootstrap() {
   // Swagger documentation
   const config = new DocumentBuilder()
     .setTitle('POS Backend API')
-    .setDescription('POS Device Backend API - Offline-first Point of Sale system')
+    .setDescription(
+      'POS Device Backend API - Offline-first Point of Sale system',
+    )
     .setVersion('1.0')
     .addBearerAuth()
     .addTag('Device', 'Device registration and configuration')

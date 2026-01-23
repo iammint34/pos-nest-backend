@@ -3,7 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { PortalApiService } from '../portal-api/portal-api.service';
 import { DeviceService } from '../device/device.service';
-import { SyncOrderPayload } from '../portal-api/portal-api.types';
+import { SyncOrderPayload, SyncShiftPayload, SyncZReadingPayload } from '../portal-api/portal-api.types';
 
 @Injectable()
 export class SalesSyncService {
@@ -100,13 +100,39 @@ export class SalesSyncService {
         try {
           switch (item.operation) {
             case 'CREATE_ORDER':
-              await this.syncOrder(item.entityId, deviceIdentifier, deviceToken);
+              await this.syncOrder(
+                item.entityId,
+                deviceIdentifier,
+                deviceToken,
+              );
               break;
             case 'VOID_ORDER':
-              await this.syncVoidedOrder(item.entityId, deviceIdentifier, deviceToken);
+              await this.syncVoidedOrder(
+                item.entityId,
+                deviceIdentifier,
+                deviceToken,
+              );
               break;
             case 'REFUND':
-              await this.syncRefund(item.entityId, deviceIdentifier, deviceToken);
+              await this.syncRefund(
+                item.entityId,
+                deviceIdentifier,
+                deviceToken,
+              );
+              break;
+            case 'SYNC_SHIFT':
+              await this.syncShift(
+                item.entityId,
+                deviceIdentifier,
+                deviceToken,
+              );
+              break;
+            case 'SYNC_ZREADING':
+              await this.syncZReading(
+                item.entityId,
+                deviceIdentifier,
+                deviceToken,
+              );
               break;
           }
 
@@ -149,7 +175,9 @@ export class SalesSyncService {
         },
       });
 
-      this.logger.log(`Sales sync completed: ${synced} synced, ${failed} failed`);
+      this.logger.log(
+        `Sales sync completed: ${synced} synced, ${failed} failed`,
+      );
 
       return { synced, failed, message: 'Sync completed' };
     } finally {
@@ -210,7 +238,10 @@ export class SalesSyncService {
         : undefined;
 
       return {
-        orderItemIndex: orderItemIndex !== undefined && orderItemIndex >= 0 ? orderItemIndex : undefined,
+        orderItemIndex:
+          orderItemIndex !== undefined && orderItemIndex >= 0
+            ? orderItemIndex
+            : undefined,
         discountName: d.discountName,
         discountType: d.discountType,
         discountScope: d.discountScope,
@@ -231,6 +262,11 @@ export class SalesSyncService {
       discountTotal: Number(order.discountTotal),
       taxTotal: Number(order.taxTotal),
       grandTotal: Number(order.grandTotal),
+      // BIR VAT Breakdown
+      vatableSales: Number(order.vatableSales) || 0,
+      vatAmount: Number(order.vatAmount) || 0,
+      vatExemptSales: Number(order.vatExemptSales) || 0,
+      zeroRatedSales: Number(order.zeroRatedSales) || 0,
       notes: order.notes ?? undefined,
       posCreatedAt: order.createdAt.toISOString(),
       posClosedAt: order.closedAt?.toISOString(),
@@ -315,6 +351,135 @@ export class SalesSyncService {
 
     // Re-sync the entire order with the refund included
     await this.syncOrder(refund.orderId, deviceIdentifier, deviceToken);
+  }
+
+  /**
+   * Sync shift to Portal
+   */
+  private async syncShift(
+    shiftId: string,
+    deviceIdentifier: string,
+    deviceToken: string,
+  ) {
+    const shift = await this.prisma.shift.findUnique({
+      where: { id: shiftId },
+      include: {
+        operator: true,
+        cashMovements: {
+          orderBy: { createdAt: 'asc' },
+        },
+        _count: {
+          select: { orders: true },
+        },
+      },
+    });
+
+    if (!shift) {
+      throw new Error('Shift not found');
+    }
+
+    const payload: SyncShiftPayload = {
+      posShiftId: shift.id,
+      posOperatorId: shift.operator.portalUserId,
+      status: shift.status,
+      openedAt: shift.openedAt.toISOString(),
+      closedAt: shift.closedAt?.toISOString(),
+      openingCash: Number(shift.openingCash),
+      closingCash: shift.closingCash ? Number(shift.closingCash) : undefined,
+      expectedCash: shift.expectedCash ? Number(shift.expectedCash) : undefined,
+      variance: shift.variance ? Number(shift.variance) : undefined,
+      notes: shift.notes ?? undefined,
+      cashMovements: shift.cashMovements.map((m) => ({
+        movementType: m.movementType,
+        amount: Number(m.amount),
+        referenceType: m.referenceType ?? undefined,
+        referenceId: m.referenceId ?? undefined,
+        reason: m.reason ?? undefined,
+        performedBy: m.performedBy,
+        performedAt: m.performedAt.toISOString(),
+      })),
+      orderCount: shift._count.orders,
+    };
+
+    const result = await this.portalApi.syncShift(
+      deviceIdentifier,
+      deviceToken,
+      payload,
+    );
+
+    if (!result.success) {
+      throw new Error(result.error || 'Shift sync failed');
+    }
+
+    // Update shift with portal ID
+    await this.prisma.shift.update({
+      where: { id: shiftId },
+      data: {
+        portalShiftId: result.portalShiftId,
+        syncStatus: 'SYNCED',
+        syncedAt: new Date(),
+      },
+    });
+  }
+
+  /**
+   * Sync Z-Reading to Portal
+   */
+  private async syncZReading(
+    zReadingId: string,
+    deviceIdentifier: string,
+    deviceToken: string,
+  ) {
+    const zReading = await this.prisma.zReading.findUnique({
+      where: { id: zReadingId },
+    });
+
+    if (!zReading) {
+      throw new Error('Z-Reading not found');
+    }
+
+    const payload: SyncZReadingPayload = {
+      posZReadingId: zReading.id,
+      zCounterNo: zReading.zCounterNo,
+      beginningInvoiceNo: zReading.beginningInvoiceNo,
+      endingInvoiceNo: zReading.endingInvoiceNo,
+      beginningGrandTotal: Number(zReading.beginningGrandTotal),
+      endingGrandTotal: Number(zReading.endingGrandTotal),
+      grossSales: Number(zReading.grossSales),
+      netSales: Number(zReading.netSales),
+      vatableSales: Number(zReading.vatableSales),
+      vatAmount: Number(zReading.vatAmount),
+      vatExemptSales: Number(zReading.vatExemptSales),
+      zeroRatedSales: Number(zReading.zeroRatedSales),
+      discountTotal: Number(zReading.discountTotal),
+      refundTotal: Number(zReading.refundTotal),
+      voidTotal: Number(zReading.voidTotal),
+      transactionCount: zReading.transactionCount,
+      voidCount: zReading.voidCount,
+      refundCount: zReading.refundCount,
+      closedBy: zReading.closedBy,
+      closedAt: zReading.closedAt.toISOString(),
+    };
+
+    const result = await this.portalApi.syncZReading(
+      deviceIdentifier,
+      deviceToken,
+      payload,
+    );
+
+    if (!result.success) {
+      throw new Error(result.error || 'Z-Reading sync failed');
+    }
+
+    // Update Z-Reading with portal ID
+    await this.prisma.zReading.update({
+      where: { id: zReadingId },
+      data: {
+        portalZReadingId: result.portalZReadingId,
+        syncStatus: 'SYNCED',
+        syncedAt: new Date(),
+      },
+    });
   }
 
   /**

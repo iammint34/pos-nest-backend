@@ -17,16 +17,25 @@ import {
   OrderQueryDto,
 } from './dto/order.dto';
 import { CurrentUserData } from '../auth/decorators/current-user.decorator';
+import { ShiftsService } from '../shifts/shifts.service';
+import { BirService } from '../bir/bir.service';
 
 @Injectable()
 export class OrdersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private shiftsService: ShiftsService,
+    private birService: BirService,
+  ) {}
 
   /**
-   * Generate next order number (resets daily)
+   * Generate next order number (includes date prefix for uniqueness)
+   * Format: YYYYMMDD-NNN (e.g., 20260122-001)
    */
   private async generateOrderNumber(): Promise<string> {
     const today = new Date();
+    const dateStr = today.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
+
     today.setHours(0, 0, 0, 0);
 
     const lastOrder = await this.prisma.order.findFirst({
@@ -36,12 +45,15 @@ export class OrdersService {
       orderBy: { orderNumber: 'desc' },
     });
 
-    if (!lastOrder) {
-      return '001';
+    let sequence = 1;
+    if (lastOrder && lastOrder.orderNumber.startsWith(dateStr)) {
+      const parts = lastOrder.orderNumber.split('-');
+      if (parts.length === 2) {
+        sequence = parseInt(parts[1], 10) + 1;
+      }
     }
 
-    const lastNumber = parseInt(lastOrder.orderNumber, 10);
-    return String(lastNumber + 1).padStart(3, '0');
+    return `${dateStr}-${String(sequence).padStart(3, '0')}`;
   }
 
   /**
@@ -50,12 +62,17 @@ export class OrdersService {
   async createOrder(dto: CreateOrderDto, user: CurrentUserData) {
     const orderNumber = await this.generateOrderNumber();
 
+    // Get current shift ID if user has one open (optional - backward compatible)
+    const shiftId = await this.shiftsService.getOpenShiftId(user.userId);
+
     const order = await this.prisma.order.create({
       data: {
         orderNumber,
         orderType: dto.orderType || OrderType.DINE_IN,
         status: OrderStatus.OPEN,
         userId: user.userId,
+        shiftId,
+        operatorId: user.userId,
         customerName: dto.customerName,
         customerPhone: dto.customerPhone,
         notes: dto.notes,
@@ -73,6 +90,13 @@ export class OrdersService {
             id: true,
             firstName: true,
             lastName: true,
+          },
+        },
+        shift: {
+          select: {
+            id: true,
+            operatorId: true,
+            openedAt: true,
           },
         },
       },
@@ -598,7 +622,7 @@ export class OrdersService {
   }
 
   /**
-   * Recalculate order totals
+   * Recalculate order totals with VAT breakdown
    */
   private async recalculateOrderTotals(orderId: string) {
     const order = await this.prisma.order.findUnique({
@@ -625,8 +649,27 @@ export class OrdersService {
       0,
     );
 
-    // Calculate grand total (no tax for now)
+    // Calculate grand total
     const grandTotal = Math.max(0, subtotal - discountTotal);
+
+    // Get BIR config for VAT settings
+    let vatBreakdown = {
+      vatableSales: 0,
+      vatAmount: 0,
+      vatExemptSales: 0,
+      zeroRatedSales: 0,
+    };
+
+    try {
+      const birConfig = await this.birService.getDeviceBirConfig();
+      vatBreakdown = this.birService.calculateVatBreakdown(
+        grandTotal,
+        birConfig.isVatRegistered,
+      );
+    } catch (error) {
+      // Device not configured yet, use default VAT calculation
+      vatBreakdown = this.birService.calculateVatBreakdown(grandTotal, true);
+    }
 
     await this.prisma.order.update({
       where: { id: orderId },
@@ -634,8 +677,94 @@ export class OrdersService {
         subtotal,
         discountTotal,
         grandTotal,
+        vatableSales: vatBreakdown.vatableSales,
+        vatAmount: vatBreakdown.vatAmount,
+        vatExemptSales: vatBreakdown.vatExemptSales,
+        zeroRatedSales: vatBreakdown.zeroRatedSales,
       },
     });
+  }
+
+  /**
+   * Finalize order for BIR compliance (called when payment is completed)
+   * Generates invoice number, updates grand total accumulator, creates journal entry
+   */
+  async finalizeOrderForBir(orderId: string, user: CurrentUserData) {
+    const order = await this.getOrderById(orderId);
+
+    if (order.invoiceNumber) {
+      // Already finalized
+      return order;
+    }
+
+    // Generate sequential invoice number
+    const invoiceNumber = await this.birService.getNextInvoiceNumber();
+
+    // Update the order with invoice number
+    const updatedOrder = await this.prisma.order.update({
+      where: { id: orderId },
+      data: { invoiceNumber },
+      include: {
+        orderItems: {
+          where: { isVoided: false },
+          include: { item: { select: { name: true } } },
+        },
+        user: { select: { id: true, firstName: true, lastName: true } },
+      },
+    });
+
+    // Update non-resettable grand total
+    await this.birService.updateGrandTotal(
+      orderId,
+      invoiceNumber,
+      Number(order.grandTotal),
+      'SALE',
+    );
+
+    // Get BIR config for receipt
+    const birConfig = await this.birService.getDeviceBirConfig();
+
+    // Create electronic journal entry
+    const receiptData = {
+      registeredName: birConfig.registeredName,
+      registeredAddress: birConfig.registeredAddress,
+      vatTin: birConfig.vatTin,
+      min: birConfig.min,
+      ptuNo: birConfig.ptuNo,
+      ptuDateIssued: birConfig.ptuDateIssued,
+      ptuValidUntil: birConfig.ptuValidUntil,
+      invoiceNumber,
+      transactionDate: new Date(),
+      cashierName: `${updatedOrder.user.firstName} ${updatedOrder.user.lastName}`,
+      items: updatedOrder.orderItems.map((item) => ({
+        name: item.itemName,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+        totalPrice: Number(item.totalPrice),
+      })),
+      subtotal: Number(order.subtotal),
+      discountTotal: Number(order.discountTotal),
+      grandTotal: Number(order.grandTotal),
+      vatableSales: Number(order.vatableSales),
+      vatAmount: Number(order.vatAmount),
+      vatExemptSales: Number(order.vatExemptSales),
+      zeroRatedSales: Number(order.zeroRatedSales),
+      customerTin: order.customerTin || undefined,
+      customerBusinessName: order.customerBusinessName || undefined,
+      customerBusinessAddress: order.customerBusinessAddress || undefined,
+      isVatRegistered: birConfig.isVatRegistered,
+    };
+
+    await this.birService.createJournalEntry(
+      orderId,
+      invoiceNumber,
+      'SALE',
+      receiptData,
+      user.userId,
+      `${updatedOrder.user.firstName} ${updatedOrder.user.lastName}`,
+    );
+
+    return updatedOrder;
   }
 
   /**
