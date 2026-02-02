@@ -32,8 +32,17 @@ export class BirController {
    */
   @Post('z-reading')
   async generateZReading(@Request() req: any) {
-    const userId = req.user.sub;
-    return this.birService.generateZReading(userId);
+    // Get the portal user ID for syncing to portal
+    let closedBy = 'system';
+    if (req.user?.userId) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: req.user.userId },
+        select: { portalUserId: true, firstName: true, lastName: true },
+      });
+      // Use portalUserId for portal sync, with name as fallback display
+      closedBy = user?.portalUserId || `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || 'system';
+    }
+    return this.birService.generateZReading(closedBy);
   }
 
   /**

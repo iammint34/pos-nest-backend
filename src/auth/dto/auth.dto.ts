@@ -27,6 +27,7 @@ export class LoginResponseDto {
     firstName: string;
     lastName: string;
     role: 'MANAGER' | 'STAFF';
+    permissions: string[];
   };
   expiresAt: Date;
 }
@@ -48,4 +49,35 @@ export class SetPinDto {
   @IsString()
   @MinLength(6)
   pin: string;
+}
+
+export class ManagerOverrideDto {
+  @ApiPropertyOptional({ description: 'Manager email (required if not using PIN)' })
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
+  @ApiPropertyOptional({ description: 'Manager password (required if not using PIN)' })
+  @IsOptional()
+  @IsString()
+  password?: string;
+
+  @ApiPropertyOptional({ description: 'Manager PIN (alternative to email/password)' })
+  @IsOptional()
+  @IsString()
+  pin?: string;
+
+  @ApiProperty({ description: 'Permission code required for this action' })
+  @IsString()
+  @IsNotEmpty()
+  requiredPermission: string;
+}
+
+export class ManagerOverrideResponseDto {
+  approved: boolean;
+  manager: {
+    id: string;
+    firstName: string;
+    lastName: string;
+  };
 }

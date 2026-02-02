@@ -24,6 +24,7 @@ import {
 } from './dto/order.dto';
 import { CurrentUser, CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { ManagerOnly } from '../auth/decorators/roles.decorator';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 
 @ApiTags('Orders')
 @Controller('orders')
@@ -116,9 +117,9 @@ export class OrdersController {
   }
 
   @Post(':id/items/:itemId/void')
-  @ManagerOnly()
+  @RequirePermissions('pos_function.void_order')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Void an order item (Manager only)' })
+  @ApiOperation({ summary: 'Void an order item' })
   @ApiResponse({ status: 200, description: 'Item voided' })
   async voidItem(
     @Param('id') id: string,
@@ -130,8 +131,8 @@ export class OrdersController {
   }
 
   @Post(':id/discounts')
-  @ManagerOnly()
-  @ApiOperation({ summary: 'Apply discount to order (Manager only)' })
+  @RequirePermissions('pos_function.apply_discount')
+  @ApiOperation({ summary: 'Apply discount to order' })
   @ApiResponse({ status: 201, description: 'Discount applied' })
   async applyDiscount(
     @Param('id') id: string,
@@ -142,8 +143,8 @@ export class OrdersController {
   }
 
   @Delete(':id/discounts/:discountId')
-  @ManagerOnly()
-  @ApiOperation({ summary: 'Remove discount from order (Manager only)' })
+  @RequirePermissions('pos_function.apply_discount')
+  @ApiOperation({ summary: 'Remove discount from order' })
   @ApiResponse({ status: 200, description: 'Discount removed' })
   async removeDiscount(
     @Param('id') id: string,
@@ -176,9 +177,9 @@ export class OrdersController {
   }
 
   @Post(':id/void')
-  @ManagerOnly()
+  @RequirePermissions('pos_function.void_order')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Void entire order (Manager only)' })
+  @ApiOperation({ summary: 'Void entire order' })
   @ApiResponse({ status: 200, description: 'Order voided' })
   async voidOrder(
     @Param('id') id: string,

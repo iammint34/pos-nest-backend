@@ -70,6 +70,11 @@ export class VoidOrderItemDto {
   @IsString()
   @IsNotEmpty()
   reason: string;
+
+  @ApiPropertyOptional({ description: 'Manager ID who approved this action' })
+  @IsOptional()
+  @IsString()
+  approvedBy?: string;
 }
 
 export class ApplyDiscountDto {
@@ -129,6 +134,11 @@ export class VoidOrderDto {
   @IsString()
   @IsNotEmpty()
   reason: string;
+
+  @ApiPropertyOptional({ description: 'Manager ID who approved this action' })
+  @IsOptional()
+  @IsString()
+  approvedBy?: string;
 }
 
 export class HoldOrderDto {

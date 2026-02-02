@@ -3,9 +3,10 @@ import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { ShiftsModule } from '../shifts/shifts.module';
 import { BirModule } from '../bir/bir.module';
+import { InventoryModule } from '../inventory/inventory.module';
 
 @Module({
-  imports: [ShiftsModule, BirModule],
+  imports: [ShiftsModule, BirModule, InventoryModule],
   controllers: [OrdersController],
   providers: [OrdersService],
   exports: [OrdersService],

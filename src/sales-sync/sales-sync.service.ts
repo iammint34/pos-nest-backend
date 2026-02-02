@@ -3,7 +3,8 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { PortalApiService } from '../portal-api/portal-api.service';
 import { DeviceService } from '../device/device.service';
-import { SyncOrderPayload, SyncShiftPayload, SyncZReadingPayload } from '../portal-api/portal-api.types';
+import { InventoryService } from '../inventory/inventory.service';
+import { SyncOrderPayload, SyncShiftPayload, SyncZReadingPayload, SyncInventoryMovementPayload } from '../portal-api/portal-api.types';
 
 @Injectable()
 export class SalesSyncService {
@@ -14,12 +15,13 @@ export class SalesSyncService {
     private prisma: PrismaService,
     private portalApi: PortalApiService,
     private deviceService: DeviceService,
+    private inventoryService: InventoryService,
   ) {}
 
   /**
-   * Scheduled sync task - runs every minute
+   * Scheduled sync task - runs every 15 seconds
    */
-  @Cron(CronExpression.EVERY_MINUTE)
+  @Cron('*/15 * * * * *')
   async scheduledSync() {
     if (this.isSyncing) {
       return;
@@ -134,6 +136,13 @@ export class SalesSyncService {
                 deviceToken,
               );
               break;
+            case 'SYNC_INVENTORY_MOVEMENT':
+              await this.syncInventoryMovement(
+                item.entityId,
+                deviceIdentifier,
+                deviceToken,
+              );
+              break;
           }
 
           // Mark as completed
@@ -230,6 +239,28 @@ export class SalesSyncService {
       voidReason: item.voidReason ?? undefined,
     }));
 
+    // Resolve local user IDs to portal user IDs for discounts and refunds
+    const localUserIds = new Set<string>();
+    for (const d of order.discounts) {
+      if (d.appliedBy) localUserIds.add(d.appliedBy);
+    }
+    for (const p of order.payments) {
+      for (const r of p.refunds) {
+        if (r.processedBy) localUserIds.add(r.processedBy);
+      }
+    }
+
+    const portalUserIdMap = new Map<string, string>();
+    if (localUserIds.size > 0) {
+      const users = await this.prisma.user.findMany({
+        where: { id: { in: Array.from(localUserIds) } },
+        select: { id: true, portalUserId: true },
+      });
+      for (const u of users) {
+        portalUserIdMap.set(u.id, u.portalUserId);
+      }
+    }
+
     // Map discounts with orderItemIndex instead of posOrderItemId
     const discounts = order.discounts.map((d) => {
       // Find the index of the order item this discount applies to
@@ -248,12 +279,14 @@ export class SalesSyncService {
         discountValue: Number(d.discountValue),
         discountAmount: Number(d.discountAmount),
         reason: d.reason ?? undefined,
+        appliedBy: d.appliedBy ? portalUserIdMap.get(d.appliedBy) : undefined,
       };
     });
 
     const payload: SyncOrderPayload = {
       posOrderId: order.id,
       orderNumber: order.orderNumber,
+      operatorId: order.user?.portalUserId,
       orderType: order.orderType,
       status: order.status,
       customerName: order.customerName ?? undefined,
@@ -289,6 +322,7 @@ export class SalesSyncService {
           amount: Number(r.amount),
           reason: r.reason ?? undefined,
           refundMethod: r.refundMethod,
+          processedBy: r.processedBy ? portalUserIdMap.get(r.processedBy) : undefined,
           processedAt: r.processedAt.toISOString(),
         })),
       ),
@@ -480,6 +514,61 @@ export class SalesSyncService {
         syncedAt: new Date(),
       },
     });
+  }
+
+  /**
+   * Sync inventory movement to Portal
+   */
+  private async syncInventoryMovement(
+    movementId: string,
+    deviceIdentifier: string,
+    deviceToken: string,
+  ) {
+    const movement = await this.prisma.inventoryMovement.findUnique({
+      where: { id: movementId },
+      include: {
+        branchInventory: {
+          include: {
+            item: { select: { portalId: true } },
+          },
+        },
+      },
+    });
+
+    if (!movement) {
+      throw new Error('Inventory movement not found');
+    }
+
+    if (!movement.branchInventory?.item?.portalId) {
+      throw new Error('Item not linked to Portal');
+    }
+
+    const payload: SyncInventoryMovementPayload = {
+      movementId: movement.movementId,
+      itemId: movement.branchInventory.item.portalId,
+      movementType: movement.movementType,
+      quantity: movement.quantity,
+      previousQuantity: movement.previousQuantity,
+      newQuantity: movement.newQuantity,
+      referenceType: movement.referenceType ?? undefined,
+      referenceId: movement.referenceId ?? undefined,
+      reason: movement.reason ?? undefined,
+      performedBy: movement.performedBy ?? undefined,
+      performedAt: movement.performedAt.toISOString(),
+    };
+
+    const result = await this.portalApi.syncInventoryMovement(
+      deviceIdentifier,
+      deviceToken,
+      payload,
+    );
+
+    if (!result.success) {
+      throw new Error(result.error || 'Inventory movement sync failed');
+    }
+
+    // Mark movement as synced
+    await this.inventoryService.markMovementSynced(movementId);
   }
 
   /**

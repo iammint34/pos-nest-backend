@@ -17,6 +17,7 @@ import {
 } from './dto/payment.dto';
 import { CurrentUser, CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { ManagerOnly } from '../auth/decorators/roles.decorator';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 
 @ApiTags('Payments')
 @Controller('orders/:orderId/payments')
@@ -72,9 +73,9 @@ export class PaymentsController {
   }
 
   @Post('refund')
-  @ManagerOnly()
+  @RequirePermissions('pos_function.process_refund')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Process a refund (Manager only)' })
+  @ApiOperation({ summary: 'Process a refund' })
   @ApiResponse({ status: 200, description: 'Refund processed' })
   async processRefund(
     @Param('orderId') orderId: string,

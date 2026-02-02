@@ -4,6 +4,7 @@ import {
   IsNumber,
   IsEnum,
   IsNotEmpty,
+  IsBoolean,
   Min,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -56,6 +57,16 @@ export class RefundDto {
   @IsOptional()
   @IsEnum(PaymentMethod)
   refundMethod?: PaymentMethod;
+
+  @ApiPropertyOptional({ description: 'Restore inventory for refunded items', default: false })
+  @IsOptional()
+  @IsBoolean()
+  restoreInventory?: boolean;
+
+  @ApiPropertyOptional({ description: 'Manager ID who approved this action' })
+  @IsOptional()
+  @IsString()
+  approvedBy?: string;
 }
 
 export class CashPaymentDto {

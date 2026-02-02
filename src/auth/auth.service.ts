@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import { LoginDto, PinLoginDto, LoginResponseDto, ChangePasswordDto, SetPinDto } from './dto/auth.dto';
+import { LoginDto, PinLoginDto, LoginResponseDto, ChangePasswordDto, SetPinDto, ManagerOverrideDto, ManagerOverrideResponseDto } from './dto/auth.dto';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'crypto';
 
@@ -101,6 +101,7 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        permissions: user.permissions ? JSON.parse(user.permissions) : [],
       },
       expiresAt: session.expiresAt,
     };
@@ -251,5 +252,60 @@ export class AuthService {
       },
     });
     return result.count;
+  }
+
+  /**
+   * Verify manager credentials for override/approval
+   * Does not create a session, just verifies credentials and permission
+   */
+  async verifyManagerOverride(dto: ManagerOverrideDto): Promise<ManagerOverrideResponseDto> {
+    let user;
+
+    // Authenticate via PIN or email/password
+    if (dto.pin) {
+      user = await this.prisma.user.findFirst({
+        where: { pin: dto.pin, isActive: true },
+      });
+      if (!user) {
+        throw new UnauthorizedException('Invalid PIN');
+      }
+    } else if (dto.email && dto.password) {
+      user = await this.prisma.user.findUnique({
+        where: { email: dto.email },
+      });
+      if (!user) {
+        throw new UnauthorizedException('Invalid email or password');
+      }
+      if (!user.isActive) {
+        throw new UnauthorizedException('User account is disabled');
+      }
+      const isPasswordValid = await bcrypt.compare(dto.password, user.passwordHash);
+      if (!isPasswordValid) {
+        throw new UnauthorizedException('Invalid email or password');
+      }
+    } else {
+      throw new BadRequestException('Either PIN or email/password is required');
+    }
+
+    // Check if user has the required permission
+    const permissions: string[] = user.permissions ? JSON.parse(user.permissions) : [];
+    const isManager = user.role === 'MANAGER';
+    const hasSpecificPermission = permissions.includes(dto.requiredPermission);
+    const hasPermission = isManager || hasSpecificPermission;
+
+    if (!hasPermission) {
+      throw new UnauthorizedException(
+        `Access denied. ${user.firstName} ${user.lastName} (${user.role}) does not have permission to approve this action. Please use a Manager account.`
+      );
+    }
+
+    return {
+      approved: true,
+      manager: {
+        id: user.id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      },
+    };
   }
 }

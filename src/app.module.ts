@@ -16,6 +16,7 @@ import { SalesSyncModule } from './sales-sync/sales-sync.module';
 import { ShiftsModule } from './shifts/shifts.module';
 import { BirModule } from './bir/bir.module';
 import { ReportsModule } from './reports/reports.module';
+import { InventoryModule } from './inventory/inventory.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { ReportsModule } from './reports/reports.module';
     ShiftsModule,
     BirModule,
     ReportsModule,
+    InventoryModule,
   ],
   controllers: [AppController],
   providers: [AppService],

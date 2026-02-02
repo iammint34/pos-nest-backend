@@ -15,6 +15,8 @@ import {
   LoginResponseDto,
   ChangePasswordDto,
   SetPinDto,
+  ManagerOverrideDto,
+  ManagerOverrideResponseDto,
 } from './dto/auth.dto';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser, CurrentUserData } from './decorators/current-user.decorator';
@@ -112,5 +114,17 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'List of active users' })
   async getActiveUsers() {
     return this.authService.getActiveUsers();
+  }
+
+  @Post('manager-override')
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify manager credentials for approval/override' })
+  @ApiResponse({ status: 200, description: 'Manager override approved' })
+  @ApiResponse({ status: 401, description: 'Invalid credentials or insufficient permissions' })
+  async verifyManagerOverride(
+    @Body() dto: ManagerOverrideDto,
+  ): Promise<ManagerOverrideResponseDto> {
+    return this.authService.verifyManagerOverride(dto);
   }
 }

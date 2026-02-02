@@ -4,9 +4,10 @@ import { SalesSyncController } from './sales-sync.controller';
 import { SalesSyncService } from './sales-sync.service';
 import { PortalApiModule } from '../portal-api/portal-api.module';
 import { DeviceModule } from '../device/device.module';
+import { InventoryModule } from '../inventory/inventory.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), PortalApiModule, DeviceModule],
+  imports: [ScheduleModule.forRoot(), PortalApiModule, DeviceModule, InventoryModule],
   controllers: [SalesSyncController],
   providers: [SalesSyncService],
   exports: [SalesSyncService],

@@ -8,6 +8,7 @@ import {
   PortalUser,
   PortalCategory,
   PortalItem,
+  PortalInventory,
   DeletedRecord,
   PortalBirConfig,
 } from '../portal-api/portal-api.types';
@@ -31,6 +32,7 @@ export interface SyncResult {
   usersSync: SyncStats;
   categoriesSync: SyncStats;
   itemsSync: SyncStats;
+  inventorySync: SyncStats;
   syncedAt: Date;
   errorMessage?: string;
 }
@@ -127,6 +129,7 @@ export class SyncService {
       usersSync: { created: 0, updated: 0, deleted: 0, errors: 0 },
       categoriesSync: { created: 0, updated: 0, deleted: 0, errors: 0 },
       itemsSync: { created: 0, updated: 0, deleted: 0, errors: 0 },
+      inventorySync: { created: 0, updated: 0, deleted: 0, errors: 0 },
       syncedAt: syncStartedAt,
     };
 
@@ -233,6 +236,11 @@ export class SyncService {
         );
       }
 
+      // Sync inventory (upserts)
+      if (syncData.inventory && syncData.inventory.length > 0) {
+        result.inventorySync = await this.syncInventory(syncData.inventory);
+      }
+
       // Sync BIR configuration from Portal
       if (syncData.birConfig) {
         await this.syncBirConfig(syncData.birConfig, syncData.storeName, syncData.branchName);
@@ -255,7 +263,9 @@ export class SyncService {
         result.categoriesSync.deleted +
         result.itemsSync.created +
         result.itemsSync.updated +
-        result.itemsSync.deleted;
+        result.itemsSync.deleted +
+        result.inventorySync.created +
+        result.inventorySync.updated;
 
       await this.logSync(
         'PORTAL_TO_POS',
@@ -270,7 +280,8 @@ export class SyncService {
         `Sync completed (v${syncData.version}): ` +
           `Users(+${result.usersSync.created}/~${result.usersSync.updated}/-${result.usersSync.deleted}), ` +
           `Categories(+${result.categoriesSync.created}/~${result.categoriesSync.updated}/-${result.categoriesSync.deleted}), ` +
-          `Items(+${result.itemsSync.created}/~${result.itemsSync.updated}/-${result.itemsSync.deleted})`,
+          `Items(+${result.itemsSync.created}/~${result.itemsSync.updated}/-${result.itemsSync.deleted}), ` +
+          `Inventory(+${result.inventorySync.created}/~${result.inventorySync.updated})`,
       );
     } catch (error) {
       result.errorMessage = error.message;
@@ -310,6 +321,7 @@ export class SyncService {
               firstName: portalUser.firstName,
               lastName: portalUser.lastName,
               role: portalUser.role,
+              permissions: portalUser.permissions ? JSON.stringify(portalUser.permissions) : null,
               pin: portalUser.pin,
               isActive: portalUser.isActive,
               syncedAt: new Date(),
@@ -325,6 +337,7 @@ export class SyncService {
               firstName: portalUser.firstName,
               lastName: portalUser.lastName,
               role: portalUser.role,
+              permissions: portalUser.permissions ? JSON.stringify(portalUser.permissions) : null,
               pin: portalUser.pin,
               isActive: portalUser.isActive,
               syncedAt: new Date(),
@@ -562,6 +575,69 @@ export class SyncService {
     }
 
     return deletedCount;
+  }
+
+  /**
+   * Sync inventory from Portal
+   */
+  private async syncInventory(
+    inventoryItems: PortalInventory[],
+  ): Promise<SyncStats> {
+    const stats: SyncStats = { created: 0, updated: 0, deleted: 0, errors: 0 };
+
+    for (const portalInventory of inventoryItems) {
+      try {
+        // Find local item by portal ID
+        const item = await this.prisma.item.findUnique({
+          where: { portalId: portalInventory.itemId },
+        });
+
+        if (!item) {
+          this.logger.warn(
+            `Item not found for portal inventory ${portalInventory.id}, skipping`,
+          );
+          continue;
+        }
+
+        const existingInventory = await this.prisma.branchInventory.findUnique({
+          where: { itemId: item.id },
+        });
+
+        if (existingInventory) {
+          // Update only settings, not the current quantity (POS is source of truth for stock)
+          await this.prisma.branchInventory.update({
+            where: { id: existingInventory.id },
+            data: {
+              portalId: portalInventory.id,
+              lowStockThreshold: portalInventory.lowStockThreshold,
+              isTracked: portalInventory.isTracked,
+              syncedAt: new Date(),
+            },
+          });
+          stats.updated++;
+        } else {
+          // Create new inventory record with initial quantity from portal
+          await this.prisma.branchInventory.create({
+            data: {
+              portalId: portalInventory.id,
+              itemId: item.id,
+              currentQuantity: portalInventory.currentQuantity,
+              lowStockThreshold: portalInventory.lowStockThreshold,
+              isTracked: portalInventory.isTracked,
+              syncedAt: new Date(),
+            },
+          });
+          stats.created++;
+        }
+      } catch (error) {
+        this.logger.error(
+          `Failed to sync inventory ${portalInventory.id}: ${error.message}`,
+        );
+        stats.errors++;
+      }
+    }
+
+    return stats;
   }
 
   /**

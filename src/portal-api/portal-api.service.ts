@@ -12,6 +12,8 @@ import {
   SyncShiftResult,
   SyncZReadingPayload,
   SyncZReadingResult,
+  SyncInventoryMovementPayload,
+  SyncInventoryMovementResult,
 } from './portal-api.types';
 
 @Injectable()
@@ -23,7 +25,7 @@ export class PortalApiService {
   constructor(private configService: ConfigService) {
     this.portalUrl = this.configService.get<string>(
       'PORTAL_API_URL',
-      'http://localhost:3000',
+      'http://localhost:3000/api/v1',
     );
 
     this.client = axios.create({
@@ -231,6 +233,28 @@ export class PortalApiService {
       return {
         success: false,
         posZReadingId: zReading.posZReadingId,
+        error: this.getErrorMessage(error),
+      };
+    }
+  }
+
+  /**
+   * Send inventory movement to Portal
+   */
+  async syncInventoryMovement(
+    deviceIdentifier: string,
+    deviceToken: string,
+    movement: SyncInventoryMovementPayload,
+  ): Promise<SyncInventoryMovementResult> {
+    try {
+      const response = await this.client.post('/inventory/sync', movement, {
+        headers: this.getAuthHeaders(deviceIdentifier, deviceToken),
+      });
+      return response.data;
+    } catch (error) {
+      return {
+        success: false,
+        movementId: movement.movementId,
         error: this.getErrorMessage(error),
       };
     }

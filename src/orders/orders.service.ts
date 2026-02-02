@@ -19,6 +19,7 @@ import {
 import { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { ShiftsService } from '../shifts/shifts.service';
 import { BirService } from '../bir/bir.service';
+import { InventoryService } from '../inventory/inventory.service';
 
 @Injectable()
 export class OrdersService {
@@ -26,6 +27,7 @@ export class OrdersService {
     private prisma: PrismaService,
     private shiftsService: ShiftsService,
     private birService: BirService,
+    private inventoryService: InventoryService,
   ) {}
 
   /**
@@ -162,6 +164,7 @@ export class OrdersService {
 
   /**
    * Add item to order
+   * If the item already exists in the order (and is not voided), increment its quantity
    */
   async addItem(orderId: string, dto: AddOrderItemDto, user: CurrentUserData) {
     const order = await this.getOrderById(orderId);
@@ -178,27 +181,65 @@ export class OrdersService {
       throw new NotFoundException('Item not found or inactive');
     }
 
-    const quantity = dto.quantity || 1;
+    const quantityToAdd = dto.quantity || 1;
     const unitPrice = item.price;
-    const totalPrice = Number(unitPrice) * quantity;
 
-    const orderItem = await this.prisma.orderItem.create({
-      data: {
+    // Check if item already exists in the order (and is not voided)
+    const existingOrderItem = await this.prisma.orderItem.findFirst({
+      where: {
         orderId,
-        itemId: item.id,
-        itemName: item.name,
-        itemSku: item.sku,
-        quantity,
-        unitPrice,
-        totalPrice,
-        notes: dto.notes,
-      },
-      include: {
-        item: {
-          select: { id: true, name: true, sku: true },
-        },
+        itemId: dto.itemId,
+        isVoided: false,
       },
     });
+
+    let orderItem;
+
+    if (existingOrderItem) {
+      // Increment quantity of existing item
+      const newQuantity = existingOrderItem.quantity + quantityToAdd;
+      const newTotalPrice = Number(unitPrice) * newQuantity;
+
+      orderItem = await this.prisma.orderItem.update({
+        where: { id: existingOrderItem.id },
+        data: {
+          quantity: newQuantity,
+          totalPrice: newTotalPrice,
+          // Append notes if provided
+          notes: dto.notes
+            ? existingOrderItem.notes
+              ? `${existingOrderItem.notes}; ${dto.notes}`
+              : dto.notes
+            : existingOrderItem.notes,
+        },
+        include: {
+          item: {
+            select: { id: true, name: true, sku: true },
+          },
+        },
+      });
+    } else {
+      // Create new order item
+      const totalPrice = Number(unitPrice) * quantityToAdd;
+
+      orderItem = await this.prisma.orderItem.create({
+        data: {
+          orderId,
+          itemId: item.id,
+          itemName: item.name,
+          itemSku: item.sku,
+          quantity: quantityToAdd,
+          unitPrice,
+          totalPrice,
+          notes: dto.notes,
+        },
+        include: {
+          item: {
+            select: { id: true, name: true, sku: true },
+          },
+        },
+      });
+    }
 
     await this.recalculateOrderTotals(orderId);
 
@@ -282,13 +323,10 @@ export class OrdersService {
   }
 
   /**
-   * Void an item (Manager only) - marks as voided instead of deleting
+   * Void an item - marks as voided instead of deleting
+   * Permission check handled by PermissionsGuard (supports manager approval via approvedBy)
    */
   async voidItem(orderId: string, itemId: string, dto: VoidOrderItemDto, user: CurrentUserData) {
-    if (user.role !== 'MANAGER') {
-      throw new ForbiddenException('Only managers can void items');
-    }
-
     const order = await this.getOrderById(orderId);
 
     const orderItem = await this.prisma.orderItem.findFirst({
@@ -463,13 +501,10 @@ export class OrdersService {
   }
 
   /**
-   * Void entire order (Manager only)
+   * Void entire order
+   * Permission check handled by PermissionsGuard (supports manager approval via approvedBy)
    */
   async voidOrder(orderId: string, dto: VoidOrderDto, user: CurrentUserData) {
-    if (user.role !== 'MANAGER') {
-      throw new ForbiddenException('Only managers can void orders');
-    }
-
     const order = await this.getOrderById(orderId);
 
     if (order.status === OrderStatus.VOIDED) {

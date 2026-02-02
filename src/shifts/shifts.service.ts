@@ -61,6 +61,9 @@ export class ShiftsService {
       },
     });
 
+    // Add to sync queue to push open shift to portal
+    await this.addToSyncQueue(shift.id);
+
     return shift;
   }
 

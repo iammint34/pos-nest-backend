@@ -63,6 +63,7 @@ export class AuthGuard implements CanActivate {
       firstName: session.user.firstName,
       lastName: session.user.lastName,
       role: session.user.role,
+      permissions: session.user.permissions ? JSON.parse(session.user.permissions) : [],
       sessionId: session.id,
     };
 

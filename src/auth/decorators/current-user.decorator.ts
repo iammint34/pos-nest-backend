@@ -6,6 +6,7 @@ export interface CurrentUserData {
   firstName: string;
   lastName: string;
   role: 'MANAGER' | 'STAFF';
+  permissions: string[];
   sessionId: string;
 }
 

@@ -29,6 +29,7 @@ import {
   CurrentUserData,
 } from '../auth/decorators/current-user.decorator';
 import { ManagerOnly } from '../auth/decorators/roles.decorator';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 
 @ApiTags('Shifts')
 @Controller('shifts')
@@ -48,6 +49,7 @@ export class ShiftsController {
   }
 
   @Post('close')
+  @RequirePermissions('pos_function.close_shift')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Close the current shift' })
   @ApiResponse({ status: 200, description: 'Shift closed with summary' })
@@ -67,6 +69,7 @@ export class ShiftsController {
   }
 
   @Post('cash-in')
+  @RequirePermissions('pos_function.open_cash_drawer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Record cash added to drawer' })
   @ApiResponse({ status: 200, description: 'Cash movement recorded' })
@@ -75,6 +78,7 @@ export class ShiftsController {
   }
 
   @Post('cash-out')
+  @RequirePermissions('pos_function.open_cash_drawer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Record cash removed from drawer' })
   @ApiResponse({ status: 200, description: 'Cash movement recorded' })
@@ -83,6 +87,7 @@ export class ShiftsController {
   }
 
   @Post('paid-out')
+  @RequirePermissions('pos_function.open_cash_drawer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Record paid out (requires reason)' })
   @ApiResponse({ status: 200, description: 'Paid out recorded' })
@@ -91,6 +96,7 @@ export class ShiftsController {
   }
 
   @Post('cash-drop')
+  @RequirePermissions('pos_function.open_cash_drawer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Record cash drop to safe' })
   @ApiResponse({ status: 200, description: 'Cash drop recorded' })

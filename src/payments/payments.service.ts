@@ -15,6 +15,7 @@ import {
 import { CurrentUserData } from '../auth/decorators/current-user.decorator';
 import { ShiftsService } from '../shifts/shifts.service';
 import { BirService } from '../bir/bir.service';
+import { InventoryService } from '../inventory/inventory.service';
 
 @Injectable()
 export class PaymentsService {
@@ -22,6 +23,7 @@ export class PaymentsService {
     private prisma: PrismaService,
     private shiftsService: ShiftsService,
     private birService: BirService,
+    private inventoryService: InventoryService,
   ) {}
 
   /**
@@ -220,13 +222,10 @@ export class PaymentsService {
   }
 
   /**
-   * Process refund (Manager only)
+   * Process refund
+   * Permission check handled by PermissionsGuard (supports manager approval via approvedBy)
    */
   async processRefund(orderId: string, dto: RefundDto, user: CurrentUserData) {
-    if (user.role !== 'MANAGER') {
-      throw new ForbiddenException('Only managers can process refunds');
-    }
-
     const order = await this.getOrderWithPayments(orderId);
 
     if (order.status !== OrderStatus.COMPLETED) {
@@ -291,6 +290,30 @@ export class PaymentsService {
         where: { id: dto.paymentId },
         data: { status: PaymentStatus.REFUNDED },
       });
+    }
+
+    // Restore inventory if requested
+    if (dto.restoreInventory) {
+      // Get order items to restore inventory
+      const orderItems = await this.prisma.orderItem.findMany({
+        where: { orderId, isVoided: false },
+      });
+
+      for (const item of orderItems) {
+        if (item.itemId) {
+          try {
+            await this.inventoryService.restoreStock(
+              item.itemId,
+              item.quantity,
+              'REFUNDED',
+              refund.id,
+              user.userId,
+            );
+          } catch (error) {
+            console.error(`Failed to restore inventory for item ${item.itemId}:`, error);
+          }
+        }
+      }
     }
 
     // Add to sync queue
@@ -429,6 +452,23 @@ export class PaymentsService {
     } catch (error) {
       console.error('Failed to create journal entry:', error);
       // Continue even if journal entry fails - order is still completed
+    }
+
+    // Deduct inventory for all items in the order
+    for (const item of order.orderItems) {
+      if (item.itemId) {
+        try {
+          await this.inventoryService.deductStock(
+            item.itemId,
+            item.quantity,
+            orderId,
+            order.user?.id,
+          );
+        } catch (error) {
+          console.error(`Failed to deduct inventory for item ${item.itemId}:`, error);
+          // Continue even if inventory deduction fails - order is still completed
+        }
+      }
     }
 
     // Add to sync queue

@@ -19,6 +19,7 @@ export interface PortalUser {
   role: 'MANAGER' | 'STAFF';
   pin?: string;
   isActive: boolean;
+  permissions?: string[];
 }
 
 export interface PortalCategory {
@@ -63,12 +64,21 @@ export interface PortalBirConfig {
   permitNumber: string;
 }
 
+export interface PortalInventory {
+  id: string;
+  itemId: string;
+  currentQuantity: number;
+  lowStockThreshold?: number;
+  isTracked: boolean;
+}
+
 export interface PortalSyncData {
   success: boolean;
   version: number;
   users?: PortalUser[];
   categories?: PortalCategory[];
   items?: PortalItem[];
+  inventory?: PortalInventory[];
   deletedUsers?: DeletedRecord[];
   deletedCategories?: DeletedRecord[];
   deletedItems?: DeletedRecord[];
@@ -91,6 +101,7 @@ export interface SyncRequestPayload {
 export interface SyncOrderPayload {
   posOrderId: string;
   orderNumber: string;
+  operatorId?: string;
   orderType?: string;
   status?: string;
   customerName?: string;
@@ -156,6 +167,7 @@ export interface SyncRefundPayload {
   amount: number;
   reason?: string;
   refundMethod: string;
+  processedBy?: string;
   processedAt: string;
 }
 
@@ -235,5 +247,27 @@ export interface SyncZReadingResult {
   success: boolean;
   posZReadingId: string;
   portalZReadingId?: string;
+  error?: string;
+}
+
+// Inventory Movement Sync Types
+export interface SyncInventoryMovementPayload {
+  movementId: string;
+  itemId: string; // Portal Item ID
+  movementType: string;
+  quantity: number;
+  previousQuantity: number;
+  newQuantity: number;
+  referenceType?: string;
+  referenceId?: string;
+  posDeviceId?: string;
+  reason?: string;
+  performedBy?: string;
+  performedAt: string;
+}
+
+export interface SyncInventoryMovementResult {
+  success: boolean;
+  movementId: string;
   error?: string;
 }
