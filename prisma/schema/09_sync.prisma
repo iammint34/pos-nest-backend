@@ -1,0 +1,37 @@
+// POS Local Backend - Sync Models
+// Queue and logging for Portal synchronization
+
+model SyncQueue {
+  id            String          @id @default(uuid())
+  operation     SyncOperation
+  entityType    String          @map("entity_type")
+  entityId      String          @map("entity_id")
+  payload       String
+  status        SyncQueueStatus @default(PENDING)
+  attempts      Int             @default(0)
+  lastAttemptAt DateTime?       @map("last_attempt_at")
+  errorMessage  String?         @map("error_message")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("sync_queue")
+}
+
+model SyncLog {
+  id           String        @id @default(uuid())
+  direction    SyncDirection
+  syncType     String        @map("sync_type")
+  status       SyncLogStatus
+  itemCount    Int?          @map("item_count")
+  errorMessage String?       @map("error_message")
+  startedAt    DateTime      @map("started_at")
+  completedAt  DateTime?     @map("completed_at")
+  createdAt    DateTime      @default(now()) @map("created_at")
+
+  @@index([direction])
+  @@index([syncType])
+  @@index([createdAt])
+  @@map("sync_logs")
+}

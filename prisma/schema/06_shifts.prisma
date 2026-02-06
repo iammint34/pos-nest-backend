@@ -1,0 +1,49 @@
+// POS Local Backend - Shift & Cash Management Models
+// Local shift tracking with sync to Portal
+
+model Shift {
+  id            String      @id @default(uuid())
+  operatorId    String      @map("operator_id")
+  status        ShiftStatus @default(OPEN)
+  openedAt      DateTime    @default(now()) @map("opened_at")
+  closedAt      DateTime?   @map("closed_at")
+  openingCash   Decimal     @default(0) @map("opening_cash")
+  closingCash   Decimal?    @map("closing_cash")
+  expectedCash  Decimal?    @map("expected_cash")
+  variance      Decimal?
+  notes         String?
+  syncStatus    String      @default("PENDING") @map("sync_status")
+  syncedAt      DateTime?   @map("synced_at")
+  portalShiftId String?     @map("portal_shift_id")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  operator      User           @relation(fields: [operatorId], references: [id])
+  cashMovements CashMovement[]
+  orders        Order[]
+
+  @@index([operatorId])
+  @@index([status])
+  @@index([syncStatus])
+  @@map("shifts")
+}
+
+model CashMovement {
+  id            String           @id @default(uuid())
+  shiftId       String           @map("shift_id")
+  movementType  CashMovementType @map("movement_type")
+  amount        Decimal
+  referenceType String?          @map("reference_type")
+  referenceId   String?          @map("reference_id")
+  reason        String?
+  performedBy   String           @map("performed_by")
+  performedAt   DateTime         @default(now()) @map("performed_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  // Relations
+  shift Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@index([shiftId])
+  @@map("cash_movements")
+}

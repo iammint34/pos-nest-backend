@@ -1,0 +1,96 @@
+// POS Local Backend - BIR Compliance Models
+// Z-Reading, Electronic Journal, and Grand Total tracking
+
+model GrandTotalLog {
+  id              String   @id @default(uuid())
+  orderId         String   @map("order_id")
+  invoiceNumber   String   @map("invoice_number")
+  amount          Decimal
+  runningTotal    Decimal  @map("running_total")
+  transactionType String   @map("transaction_type")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // Note: This table is append-only. No UPDATE or DELETE operations allowed.
+  @@index([orderId])
+  @@index([createdAt])
+  @@map("grand_total_log")
+}
+
+model ZReading {
+  id String @id @default(uuid())
+
+  // Z-Counter (Non-resettable, increments daily)
+  zCounterNo Int @unique @map("z_counter_no")
+
+  // Invoice Range for the day
+  beginningInvoiceNo String @map("beginning_invoice_no")
+  endingInvoiceNo    String @map("ending_invoice_no")
+
+  // Grand Total Tracking (Non-resettable)
+  beginningGrandTotal Decimal @map("beginning_grand_total")
+  endingGrandTotal    Decimal @map("ending_grand_total")
+
+  // Daily Sales Summary
+  grossSales     Decimal @map("gross_sales")
+  netSales       Decimal @map("net_sales")
+  vatableSales   Decimal @map("vatable_sales")
+  vatAmount      Decimal @map("vat_amount")
+  vatExemptSales Decimal @map("vat_exempt_sales")
+  zeroRatedSales Decimal @map("zero_rated_sales")
+
+  // Adjustments
+  discountTotal Decimal @default(0) @map("discount_total")
+  refundTotal   Decimal @default(0) @map("refund_total")
+  voidTotal     Decimal @default(0) @map("void_total")
+
+  // Transaction Counts
+  transactionCount Int @map("transaction_count")
+  voidCount        Int @default(0) @map("void_count")
+  refundCount      Int @default(0) @map("refund_count")
+
+  // Metadata
+  closedBy         String    @map("closed_by")
+  closedAt         DateTime  @map("closed_at")
+  syncStatus       String    @default("PENDING") @map("sync_status")
+  syncedAt         DateTime? @map("synced_at")
+  portalZReadingId String?   @map("portal_zreading_id")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  @@index([closedAt])
+  @@index([syncStatus])
+  @@map("z_readings")
+}
+
+model ElectronicJournal {
+  id String @id @default(uuid())
+
+  // Transaction Reference
+  orderId         String @map("order_id")
+  invoiceNumber   String @map("invoice_number")
+  transactionType String @map("transaction_type")
+
+  // Receipt Content (Read-only, immutable record)
+  receiptContent String @map("receipt_content")
+  receiptHash    String @map("receipt_hash")
+
+  // Amounts
+  grandTotal Decimal @map("grand_total")
+  vatAmount  Decimal @map("vat_amount")
+
+  // Operator Info
+  operatorId   String @map("operator_id")
+  operatorName String @map("operator_name")
+
+  // Timestamps
+  transactionDate DateTime  @map("transaction_date")
+  syncStatus      String    @default("PENDING") @map("sync_status")
+  syncedAt        DateTime? @map("synced_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  // Note: This table is append-only. No UPDATE or DELETE operations allowed.
+  @@index([orderId])
+  @@index([invoiceNumber])
+  @@index([transactionDate])
+  @@index([syncStatus])
+  @@map("electronic_journal")
+}

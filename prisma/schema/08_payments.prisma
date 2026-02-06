@@ -1,0 +1,42 @@
+// POS Local Backend - Payment Models
+// Payment processing and refunds
+
+model Payment {
+  id              String        @id @default(uuid())
+  orderId         String        @map("order_id")
+  paymentMethod   PaymentMethod @map("payment_method")
+  status          PaymentStatus @default(COMPLETED)
+  amount          Decimal
+  tipAmount       Decimal       @default(0) @map("tip_amount")
+  changeAmount    Decimal       @default(0) @map("change_amount")
+  referenceNumber String?       @map("reference_number")
+  processedBy     String        @map("processed_by")
+  processedAt     DateTime      @default(now()) @map("processed_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  // Relations
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  refunds Refund[]
+
+  @@index([orderId])
+  @@map("payments")
+}
+
+model Refund {
+  id           String        @id @default(uuid())
+  paymentId    String        @map("payment_id")
+  orderId      String        @map("order_id")
+  amount       Decimal
+  reason       String?
+  refundMethod PaymentMethod @map("refund_method")
+  processedBy  String        @map("processed_by")
+  processedAt  DateTime      @default(now()) @map("processed_at")
+  createdAt    DateTime      @default(now()) @map("created_at")
+
+  // Relations
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@index([orderId])
+  @@map("refunds")
+}

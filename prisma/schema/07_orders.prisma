@@ -1,0 +1,103 @@
+// POS Local Backend - Order Models
+// Local order management
+
+model Order {
+  id            String      @id @default(uuid())
+  orderNumber   String      @unique @map("order_number")
+  invoiceNumber String?     @unique @map("invoice_number")
+  orderType     OrderType   @default(DINE_IN) @map("order_type")
+  status        OrderStatus @default(OPEN)
+  userId        String      @map("user_id")
+  shiftId       String?     @map("shift_id")
+  operatorId    String?     @map("operator_id")
+  customerName  String?     @map("customer_name")
+  customerPhone String?     @map("customer_phone")
+  subtotal      Decimal     @default(0)
+  discountTotal Decimal     @default(0) @map("discount_total")
+  taxTotal      Decimal     @default(0) @map("tax_total")
+  grandTotal    Decimal     @default(0) @map("grand_total")
+
+  // BIR VAT Breakdown
+  vatableSales   Decimal @default(0) @map("vatable_sales")
+  vatAmount      Decimal @default(0) @map("vat_amount")
+  vatExemptSales Decimal @default(0) @map("vat_exempt_sales")
+  zeroRatedSales Decimal @default(0) @map("zero_rated_sales")
+
+  // B2B Customer Info (for claiming input tax)
+  customerTin             String? @map("customer_tin")
+  customerBusinessName    String? @map("customer_business_name")
+  customerBusinessAddress String? @map("customer_business_address")
+
+  notes         String?
+  syncStatus    String    @default("PENDING") @map("sync_status")
+  syncedAt      DateTime? @map("synced_at")
+  portalOrderId String?   @map("portal_order_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  closedAt      DateTime? @map("closed_at")
+
+  // Relations
+  user       User            @relation(fields: [userId], references: [id])
+  shift      Shift?          @relation(fields: [shiftId], references: [id])
+  orderItems OrderItem[]
+  discounts  OrderDiscount[]
+  payments   Payment[]
+
+  @@index([userId])
+  @@index([shiftId])
+  @@index([status])
+  @@index([syncStatus])
+  @@index([invoiceNumber])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id             String   @id @default(uuid())
+  orderId        String   @map("order_id")
+  itemId         String?  @map("item_id")
+  itemName       String   @map("item_name")
+  itemSku        String?  @map("item_sku")
+  quantity       Int      @default(1)
+  unitPrice      Decimal  @map("unit_price")
+  discountAmount Decimal  @default(0) @map("discount_amount")
+  taxAmount      Decimal  @default(0) @map("tax_amount")
+  totalPrice     Decimal  @map("total_price")
+  notes          String?
+  isVoided       Boolean  @default(false) @map("is_voided")
+  voidReason     String?  @map("void_reason")
+  voidedBy       String?  @map("voided_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  order     Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  item      Item?           @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  discounts OrderDiscount[]
+
+  @@index([orderId])
+  @@index([itemId])
+  @@map("order_items")
+}
+
+model OrderDiscount {
+  id             String        @id @default(uuid())
+  orderId        String        @map("order_id")
+  orderItemId    String?       @map("order_item_id")
+  discountName   String        @map("discount_name")
+  discountType   DiscountType  @map("discount_type")
+  discountScope  DiscountScope @map("discount_scope")
+  discountValue  Decimal       @map("discount_value")
+  discountAmount Decimal       @map("discount_amount")
+  reason         String?
+  appliedBy      String        @map("applied_by")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  // Relations
+  order     Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItem OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([orderItemId])
+  @@map("order_discounts")
+}

@@ -1,0 +1,50 @@
+// POS Local Backend - Inventory Models
+// Local stock tracking with sync to Portal
+
+model BranchInventory {
+  id                String    @id @default(uuid())
+  portalId          String?   @unique @map("portal_id")
+  itemId            String    @map("item_id")
+  currentQuantity   Int       @default(0) @map("current_quantity")
+  lowStockThreshold Int?      @map("low_stock_threshold")
+  isTracked         Boolean   @default(true) @map("is_tracked")
+  syncedAt          DateTime? @map("synced_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  item      Item                @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  movements InventoryMovement[]
+
+  @@unique([itemId])
+  @@map("branch_inventory")
+}
+
+model InventoryMovement {
+  id                String             @id @default(uuid())
+  movementId        String             @unique @map("movement_id")
+  branchInventoryId String             @map("branch_inventory_id")
+  itemId            String             @map("item_id")
+  movementType      MovementType       @map("movement_type")
+  quantity          Int
+  previousQuantity  Int                @map("previous_quantity")
+  newQuantity       Int                @map("new_quantity")
+  referenceType     String?            @map("reference_type")
+  referenceId       String?            @map("reference_id")
+  reason            String?
+  performedBy       String?            @map("performed_by")
+  performedAt       DateTime           @map("performed_at")
+  syncStatus        MovementSyncStatus @default(PENDING) @map("sync_status")
+  syncedAt          DateTime?          @map("synced_at")
+  createdAt         DateTime           @default(now()) @map("created_at")
+
+  // Relations
+  branchInventory BranchInventory @relation(fields: [branchInventoryId], references: [id], onDelete: Cascade)
+
+  @@index([branchInventoryId])
+  @@index([itemId])
+  @@index([movementType])
+  @@index([performedAt])
+  @@index([syncStatus])
+  @@map("inventory_movements")
+}

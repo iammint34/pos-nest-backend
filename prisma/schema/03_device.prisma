@@ -1,0 +1,41 @@
+// POS Local Backend - Device Configuration
+// Local device settings and BIR compliance info
+
+model DeviceConfig {
+  id               String    @id @default(uuid())
+  deviceIdentifier String    @unique @map("device_identifier")
+  deviceName       String?   @map("device_name")
+  storeId          String    @map("store_id")
+  storeName        String?   @map("store_name")
+  branchId         String    @map("branch_id")
+  branchName       String?   @map("branch_name")
+  deviceToken      String?   @map("device_token")
+  tokenExpiresAt   DateTime? @map("token_expires_at")
+  lastSyncAt       DateTime? @map("last_sync_at")
+  lastSyncVersion  Int?      @map("last_sync_version")
+  isRegistered     Boolean   @default(false) @map("is_registered")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  // BIR Compliance - Store Info (synced from Portal)
+  registeredName    String? @map("registered_name")
+  registeredAddress String? @map("registered_address")
+  vatTin            String? @map("vat_tin")
+  isVatRegistered   Boolean @default(true) @map("is_vat_registered")
+
+  // BIR Compliance - Branch/Device Info (synced from Portal)
+  min             String?
+  serialNumber    String? @map("serial_number")
+  permitNumber    String? @map("permit_number")
+  ptuNo           String? @map("ptu_no")
+  ptuDateIssued   String? @map("ptu_date_issued")
+  ptuValidUntil   String? @map("ptu_valid_until")
+  accreditationNo String? @map("accreditation_no")
+
+  // BIR Compliance - Counters (Non-resettable)
+  nextInvoiceNumber Int     @default(1) @map("next_invoice_number")
+  grandTotalAccum   Decimal @default(0) @map("grand_total_accum")
+  zCounterNo        Int     @default(0) @map("z_counter_no")
+
+  @@map("device_config")
+}

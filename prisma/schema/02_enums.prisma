@@ -1,0 +1,138 @@
+// POS Local Backend - Enums
+// Shared enumerations used across multiple models
+
+// =====================
+// User Enums
+// =====================
+
+enum UserRole {
+  MANAGER
+  STAFF
+}
+
+// =====================
+// Shift Enums
+// =====================
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum CashMovementType {
+  OPENING_FLOAT
+  CASH_SALE
+  CHANGE_GIVEN
+  TIP_CASH
+  PAID_OUT
+  DROP
+  CASH_IN
+  REFUND
+  CLOSING_COUNT
+}
+
+// =====================
+// Order Enums
+// =====================
+
+enum OrderStatus {
+  OPEN
+  HELD
+  COMPLETED
+  VOIDED
+}
+
+enum OrderType {
+  DINE_IN
+  TAKEOUT
+  DELIVERY
+  DRIVE_THRU
+}
+
+// =====================
+// Payment Enums
+// =====================
+
+enum PaymentMethod {
+  CASH
+  CREDIT_CARD
+  DEBIT_CARD
+  MOBILE_PAYMENT
+  GIFT_CARD
+  STORE_CREDIT
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+// =====================
+// Discount Enums
+// =====================
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
+enum DiscountScope {
+  ORDER
+  ITEM
+}
+
+// =====================
+// Sync Enums
+// =====================
+
+enum SyncOperation {
+  CREATE_ORDER
+  VOID_ORDER
+  REFUND
+  SYNC_SHIFT
+  SYNC_ZREADING
+  SYNC_INVENTORY_MOVEMENT
+}
+
+enum SyncQueueStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+enum SyncDirection {
+  PORTAL_TO_POS
+  POS_TO_PORTAL
+}
+
+enum SyncLogStatus {
+  SUCCESS
+  FAILED
+  PARTIAL
+}
+
+// =====================
+// Inventory Enums
+// =====================
+
+enum MovementType {
+  RECEIVED
+  SOLD
+  ADJUSTED_UP
+  ADJUSTED_DOWN
+  WASTED
+  VOIDED_SALE
+  REFUNDED
+  TRANSFER_IN
+  TRANSFER_OUT
+}
+
+enum MovementSyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+}
