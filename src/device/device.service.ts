@@ -180,6 +180,73 @@ export class DeviceService {
   }
 
   /**
+   * Verify device is still registered on the Portal by sending a heartbeat.
+   * Returns { registered: true } if valid, or clears local data and returns
+   * { registered: false } if the Portal says the device is gone/invalid.
+   * Network errors are treated as offline — local state is kept.
+   */
+  async verifyWithPortal(): Promise<{
+    registered: boolean;
+    offline?: boolean;
+    reason?: string;
+  }> {
+    const config = await this.prisma.deviceConfig.findFirst();
+    if (!config || !config.isRegistered) {
+      return { registered: false, reason: 'not_registered_locally' };
+    }
+
+    try {
+      const result = await this.portalApi.sendHeartbeat(
+        config.deviceIdentifier,
+        config.deviceToken,
+      );
+
+      if (result.success) {
+        return { registered: true };
+      }
+
+      // sendHeartbeat returns { success: false } on errors it catches
+      // This means portal rejected the heartbeat — clear local data
+      await this.clearRegistrationData();
+      return { registered: false, reason: 'portal_rejected' };
+    } catch (error: any) {
+      const status = error?.status || error?.response?.status;
+
+      if (status === 401 || status === 404) {
+        // Device token invalid or device deleted from portal
+        await this.clearRegistrationData();
+        return { registered: false, reason: status === 401 ? 'token_invalid' : 'device_not_found' };
+      }
+
+      // Network or other error — keep local state, assume offline
+      return { registered: true, offline: true };
+    }
+  }
+
+  /**
+   * Clear registration and portal-synced data only.
+   * Preserves all locally generated transaction records
+   * (orders, payments, shifts, Z-readings, journals) for BIR compliance.
+   */
+  private async clearRegistrationData() {
+    await this.prisma.$transaction([
+      // Clear active sessions (users need to re-authenticate after re-registration)
+      this.prisma.userSession.deleteMany({}),
+      // Clear portal-synced reference data
+      this.prisma.syncLog.deleteMany({}),
+      // Reset device registration (keep the row but mark as unregistered)
+      this.prisma.deviceConfig.updateMany({
+        where: { isRegistered: true },
+        data: {
+          isRegistered: false,
+          deviceToken: null,
+          tokenExpiresAt: null,
+        },
+      }),
+    ]);
+  }
+
+  /**
    * Unregister device (for testing/reset)
    */
   async unregisterDevice() {

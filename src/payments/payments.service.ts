@@ -5,7 +5,12 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { OrderStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
+import {
+  OrderStatus,
+  PaymentMethod,
+  PaymentStatus,
+  Prisma,
+} from '@prisma/client';
 import {
   ProcessPaymentDto,
   SplitPaymentDto,
@@ -218,7 +223,7 @@ export class PaymentsService {
 
     await this.completeOrder(orderId);
 
-    return payments;
+    return { payments };
   }
 
   /**
@@ -367,7 +372,7 @@ export class PaymentsService {
   /**
    * Complete order after full payment (with BIR compliance)
    */
-  private async completeOrder(orderId: string, user?: CurrentUserData) {
+  private async completeOrder(orderId: string, user?: CurrentUserData): Promise<void> {
     // Generate BIR invoice number
     const invoiceNumber = await this.birService.getNextInvoiceNumber();
 

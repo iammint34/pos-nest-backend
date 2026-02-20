@@ -119,7 +119,8 @@ export class PortalApiService {
   }
 
   /**
-   * Send heartbeat to Portal
+   * Send heartbeat to Portal.
+   * Throws on 401/404 so callers can detect invalid/deleted devices.
    */
   async sendHeartbeat(
     deviceIdentifier: string,
@@ -134,7 +135,19 @@ export class PortalApiService {
       });
       return response.data;
     } catch (error) {
-      this.logger.warn(`Heartbeat failed: ${this.getErrorMessage(error)}`);
+      const status = axios.isAxiosError(error)
+        ? error.response?.status
+        : undefined;
+      this.logger.warn(
+        `Heartbeat failed (status=${status}): ${this.getErrorMessage(error)}`,
+      );
+
+      // Let 401/404 propagate so device verification can handle them
+      if (status === 401 || status === 404) {
+        throw new HttpException(this.getErrorMessage(error), status);
+      }
+
+      // Other errors (network, 500, etc.) — return failure without throwing
       return { success: false, timestamp: new Date().toISOString() };
     }
   }
@@ -225,9 +238,13 @@ export class PortalApiService {
     zReading: SyncZReadingPayload,
   ): Promise<SyncZReadingResult> {
     try {
-      const response = await this.client.post('/reports/z-readings/sync', zReading, {
-        headers: this.getAuthHeaders(deviceIdentifier, deviceToken),
-      });
+      const response = await this.client.post(
+        '/reports/z-readings/sync',
+        zReading,
+        {
+          headers: this.getAuthHeaders(deviceIdentifier, deviceToken),
+        },
+      );
       return response.data;
     } catch (error) {
       return {

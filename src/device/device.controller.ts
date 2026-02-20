@@ -46,6 +46,15 @@ export class DeviceController {
     return { isRegistered };
   }
 
+  @Post('verify-portal')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify device is still registered on Portal' })
+  @ApiResponse({ status: 200, description: 'Verification result' })
+  async verifyWithPortal() {
+    return this.deviceService.verifyWithPortal();
+  }
+
   @Delete('unregister')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Unregister device' })
