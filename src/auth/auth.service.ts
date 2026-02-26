@@ -6,7 +6,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto, PinLoginDto, LoginResponseDto, ChangePasswordDto, SetPinDto, ManagerOverrideDto, ManagerOverrideResponseDto } from './dto/auth.dto';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import { randomUUID } from 'crypto';
 
 @Injectable()

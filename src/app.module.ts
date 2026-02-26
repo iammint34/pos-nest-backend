@@ -17,6 +17,7 @@ import { ShiftsModule } from './shifts/shifts.module';
 import { BirModule } from './bir/bir.module';
 import { ReportsModule } from './reports/reports.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { RewardsModule } from './rewards/rewards.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { InventoryModule } from './inventory/inventory.module';
     BirModule,
     ReportsModule,
     InventoryModule,
+    RewardsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
